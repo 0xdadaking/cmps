@@ -1,0 +1,11 @@
+# The rpc address of the chain node
+#RpcAddr     = "ws://106.15.44.155:9948/"
+RpcAddr     = "ws://192.168.14.211:9944"
+# The IP address of the machine's public network used by the scheduler program
+ServiceAddr = "127.0.0.1"
+# Port number monitored by the scheduler program
+ServicePort = "8081"
+# Data storage directory
+DataDir     = ".workdata"
+# Phrase or seed of the controller account
+AccountSeed = "tray fine poem nothing glimpse insane carbon empty grief dismiss bird nurse"
