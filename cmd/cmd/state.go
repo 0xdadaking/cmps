@@ -17,7 +17,6 @@
 package cmd
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"time"
@@ -63,7 +62,7 @@ func Command_State_Runfunc(cmd *cobra.Command, args []string) {
 			log.Printf("[err] %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println(ossState)
+		log.Println(ossState)
 		os.Exit(0)
 	}
 	log.Println("[err] Please enter 'scheduler update <ipv4> <port>'")

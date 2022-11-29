@@ -28,19 +28,20 @@ import (
 	"cmps/pkg/chain"
 	"cmps/pkg/confile"
 	"cmps/pkg/db"
-	"cmps/pkg/logger"
 	"cmps/pkg/utils"
 
 	"github.com/spf13/cobra"
 )
 
+func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+}
+
 // start service
-func Command_Run_Runfunc(cmd *cobra.Command, args []string) {
+func Command_Run_Runfunc(cmd *cobra.Command, _ []string) {
 	var (
-		err      error
-		logDir   string
-		cacheDir string
-		node     = node.New()
+		err  error
+		node = node.New()
 	)
 
 	// Building Profile Instances
@@ -59,20 +60,6 @@ func Command_Run_Runfunc(cmd *cobra.Command, args []string) {
 
 	//Build Data Directory
 	err = buildDir(node)
-	if err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-
-	//Build cache instance
-	node.Cache, err = buildCache(cacheDir)
-	if err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-
-	//Build Log Instance
-	node.Logs, err = buildLogs(logDir)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
@@ -173,20 +160,16 @@ func buildDir(n *node.Node) error {
 		}
 	}
 
-	logDir := filepath.Join(baseDir, configs.Log)
-	_, err = os.Stat(logDir)
-	if err == nil {
-		bkp := logDir + fmt.Sprintf("_%v", time.Now().Unix())
-		os.Rename(logDir, bkp)
-	}
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return err
-	}
-
 	cacheDir := filepath.Join(baseDir, configs.Cache)
 	//os.RemoveAll(cacheDir)
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return err
+	}
+	//Build cache instance
+	n.Cache, err = buildCache(cacheDir)
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
 	}
 
 	n.FileStashDir = filepath.Join(baseDir, configs.FileStashs)
@@ -219,12 +202,4 @@ func buildCache(cacheDir string) (db.Cacher, error) {
 		err = cache.Put([]byte("SigningKey"), []byte(utils.GetRandomcode(16)))
 	}
 	return cache, err
-}
-
-func buildLogs(logDir string) (logger.Logger, error) {
-	var logs_info = make(map[string]string)
-	for _, v := range configs.LogFiles {
-		logs_info[v] = filepath.Join(logDir, v+".log")
-	}
-	return logger.NewLogs(logs_info)
 }

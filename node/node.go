@@ -21,7 +21,6 @@ import (
 	"cmps/pkg/chain"
 	"cmps/pkg/confile"
 	"cmps/pkg/db"
-	"cmps/pkg/logger"
 	"log"
 	"time"
 
@@ -36,7 +35,6 @@ type Oss interface {
 type Node struct {
 	Confile      confile.Confiler
 	Chain        chain.Chainer
-	Logs         logger.Logger
 	Cache        db.Cacher
 	Gin          *gin.Engine
 	FileStashDir string

@@ -1,8 +1,8 @@
 package erasure
 
 import (
-	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"github.com/klauspost/reedsolomon"
@@ -133,7 +133,7 @@ func (t RsecDecoder) buildInputShardReaders() (r []io.Reader, size int64, err er
 			return nil, 0, errors.Wrapf(err, "fail read shard %d", i)
 		}
 		if n == 0 {
-			fmt.Println("missing shard", i)
+			log.Println("missing shard", i)
 			shards[i] = nil
 			continue
 		}
@@ -159,12 +159,12 @@ func (t RsecDecoder) Decode() error {
 	// Verify the shards
 	ok, err := enc.Verify(shards)
 	if !ok {
-		fmt.Println("Verification failed. Reconstructing data")
+		log.Println("Verification failed. Reconstructing data")
 		// Create out destination writers
 		out := make([]io.Writer, len(shards))
 		for i := range out {
 			if shards[i] == nil {
-				fmt.Println("Creating shard", i)
+				log.Println("Creating shard", i)
 				out[i], err = t.shardCreater(i)
 				if err != nil {
 					return errors.Wrapf(err, "fail create shard %d", i)

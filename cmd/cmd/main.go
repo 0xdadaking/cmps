@@ -17,7 +17,7 @@
 package cmd
 
 import (
-	"fmt"
+	"log"
 	"os"
 
 	"cmps/configs"
@@ -58,7 +58,7 @@ func Command_Version() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(configs.Version)
+			log.Println(configs.Version)
 			os.Exit(0)
 		},
 		DisableFlagsInUseLine: true,

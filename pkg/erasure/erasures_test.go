@@ -3,6 +3,7 @@ package erasure
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,7 +32,7 @@ func TestEncode(t *testing.T) {
 	assert.NoError(t, err)
 	rsece, err := NewRsecEncoderByFile(f, shardCreater, shardOpener)
 	err = rsece.Encode()
-	fmt.Println(rsece.DataShards(), rsece.ParityShards())
+	log.Println(rsece.DataShards(), rsece.ParityShards())
 	assert.NoError(t, err)
 }
 
