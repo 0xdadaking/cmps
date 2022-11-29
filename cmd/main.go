@@ -17,7 +17,7 @@
 package main
 
 import (
-	"cmp/cmd/cmd"
+	"cmps/cmd/cmd"
 )
 
 // Program entry

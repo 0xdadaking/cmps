@@ -23,7 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"cmp/configs"
+	"cmps/configs"
 
 	"github.com/klauspost/reedsolomon"
 )

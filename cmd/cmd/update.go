@@ -23,10 +23,11 @@ import (
 	"strconv"
 	"time"
 
-	"cmp/configs"
-	"cmp/pkg/chain"
-	"cmp/pkg/confile"
-	"cmp/pkg/utils"
+	"cmps/configs"
+	"cmps/pkg/chain"
+	"cmps/pkg/confile"
+	"cmps/pkg/utils"
+
 	"github.com/spf13/cobra"
 )
 

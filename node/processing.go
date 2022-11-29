@@ -9,7 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"cmp/configs"
+	"cmps/configs"
 )
 
 type Client interface {

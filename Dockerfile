@@ -6,7 +6,8 @@ ENV https_proxy ${https_proxy}
 ENV http_proxy ${http_proxy}
 
 RUN set -eux; \
-  apk add build-base make git
+  apk add make git
+  #apk add build-base make git
 
 # Download packages first so they can be cached.
 COPY go.mod go.sum /opt/target/
@@ -19,6 +20,6 @@ RUN cd /opt/target/ \
   && make
 
 FROM golang:1.19.2-alpine3.16
-WORKDIR /opt/cmp
-COPY --from=builder /opt/target/cmp ./
-COPY --from=builder /opt/target/static ./
+WORKDIR /opt/cmps
+COPY --from=builder /opt/target/cmps ./
+COPY --from=builder /opt/target/static ./static

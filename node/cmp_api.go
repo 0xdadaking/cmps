@@ -1,10 +1,10 @@
 package node
 
 import (
-	"cmp/configs"
-	"cmp/node/resp"
-	"cmp/pkg/chain"
-	"cmp/pkg/utils"
+	"cmps/configs"
+	"cmps/node/resp"
+	"cmps/pkg/chain"
+	"cmps/pkg/utils"
 	"net/http"
 
 	"fmt"

@@ -23,13 +23,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"cmp/configs"
-	"cmp/node"
-	"cmp/pkg/chain"
-	"cmp/pkg/confile"
-	"cmp/pkg/db"
-	"cmp/pkg/logger"
-	"cmp/pkg/utils"
+	"cmps/configs"
+	"cmps/node"
+	"cmps/pkg/chain"
+	"cmps/pkg/confile"
+	"cmps/pkg/db"
+	"cmps/pkg/logger"
+	"cmps/pkg/utils"
 
 	"github.com/spf13/cobra"
 )

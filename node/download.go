@@ -26,9 +26,9 @@ import (
 	"sync"
 	"time"
 
-	"cmp/pkg/chain"
-	"cmp/pkg/erasure"
-	"cmp/pkg/utils"
+	"cmps/pkg/chain"
+	"cmps/pkg/erasure"
+	"cmps/pkg/utils"
 
 	cesskeyring "github.com/CESSProject/go-keyring"
 )

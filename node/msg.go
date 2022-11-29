@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"cmp/configs"
+	"cmps/configs"
 )
 
 type MsgType byte

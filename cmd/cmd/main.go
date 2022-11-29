@@ -20,7 +20,8 @@ import (
 	"fmt"
 	"os"
 
-	"cmp/configs"
+	"cmps/configs"
+
 	"github.com/spf13/cobra"
 )
 

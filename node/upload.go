@@ -27,11 +27,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"cmp/configs"
-	"cmp/pkg/chain"
-	"cmp/pkg/erasure"
-	"cmp/pkg/hashtree"
-	"cmp/pkg/utils"
+	"cmps/configs"
+	"cmps/pkg/chain"
+	"cmps/pkg/erasure"
+	"cmps/pkg/hashtree"
+	"cmps/pkg/utils"
 
 	"github.com/pkg/errors"
 

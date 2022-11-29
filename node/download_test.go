@@ -1,8 +1,8 @@
 package node
 
 import (
-	"cmp/pkg/chain"
-	"cmp/pkg/confile"
+	"cmps/pkg/chain"
+	"cmps/pkg/confile"
 	"testing"
 
 	"github.com/centrifuge/go-substrate-rpc-client/v4/types"

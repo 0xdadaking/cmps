@@ -17,11 +17,11 @@
 package node
 
 import (
-	"cmp/configs"
-	"cmp/pkg/chain"
-	"cmp/pkg/confile"
-	"cmp/pkg/db"
-	"cmp/pkg/logger"
+	"cmps/configs"
+	"cmps/pkg/chain"
+	"cmps/pkg/confile"
+	"cmps/pkg/db"
+	"cmps/pkg/logger"
 	"log"
 	"time"
 

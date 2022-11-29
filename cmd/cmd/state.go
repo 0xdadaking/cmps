@@ -22,8 +22,9 @@ import (
 	"os"
 	"time"
 
-	"cmp/pkg/chain"
-	"cmp/pkg/confile"
+	"cmps/pkg/chain"
+	"cmps/pkg/confile"
+
 	"github.com/spf13/cobra"
 )
 

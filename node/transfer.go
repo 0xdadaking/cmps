@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"cmp/configs"
+	"cmps/configs"
 )
 
 type TcpCon struct {

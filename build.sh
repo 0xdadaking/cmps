@@ -42,7 +42,8 @@ while getopts ":hp" opt; do
     esac
 done
 
-IMG_ID="videown/cmp:latest"
+MIRROR="harbor.tianhecloud.com:54616"
+IMG_ID="videown/cmps:latest"
 
 if [ -n "$MIRROR" ]; then
     IMG_ID="$MIRROR/$IMG_ID"
@@ -50,12 +51,13 @@ fi
 
 log_info "building $IMG_ID"
 
-docker build -t $IMG_ID --build-arg go_proxy=https://goproxy.cn,direct . 
+#DOCKER_BUILDKIT=1 --progress=plain
+docker build -t $IMG_ID --build-arg go_proxy=https://goproxy.cn,direct --build-arg https_proxy=http://172.16.2.89:7890 --build-arg http_proxy=http://172.16.2.89:7890 . 
 
 if [ $? -eq "0" ]; then
-    log_info "Done building cmp image, tag: $IMG_ID"
+    log_info "Done building cmps image, tag: $IMG_ID"
 else
-    log_err "Failed on building cmp."
+    log_err "Failed on building cmps."
     exit 1
 fi
 

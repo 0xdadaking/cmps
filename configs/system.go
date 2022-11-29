@@ -23,7 +23,7 @@ import (
 // system
 const (
 	// name
-	Name = "cmp"
+	Name = "cmps"
 	// Name space
 	NameSpace = Name
 	// version

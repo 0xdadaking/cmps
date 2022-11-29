@@ -21,7 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"cmp/pkg/utils"
+	"cmps/pkg/utils"
+
 	"github.com/centrifuge/go-substrate-rpc-client/v4/types"
 	"github.com/pkg/errors"
 )

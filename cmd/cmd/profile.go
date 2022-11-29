@@ -21,7 +21,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"cmp/pkg/confile"
+	"cmps/pkg/confile"
+
 	"github.com/spf13/cobra"
 )
 
