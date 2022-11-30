@@ -107,6 +107,7 @@ func (t *RsecEncoder) Encode() error {
 
 type RsecDecoder struct {
 	output       io.Writer
+	outputSize   int64
 	dataShards   int
 	parityShards int
 
@@ -114,9 +115,13 @@ type RsecDecoder struct {
 	shardCreater ShardCreateFunc
 }
 
+func (t RsecDecoder) DataShards() int   { return t.dataShards }
+func (t RsecDecoder) ParityShards() int { return t.parityShards }
+
 func NewRsecDecoder(output io.Writer, dataShards, parityShards int, shardReader ShardOpenFunc, shardCreater ShardCreateFunc) RsecDecoder {
 	return RsecDecoder{
 		output,
+		-1,
 		dataShards,
 		parityShards,
 		shardReader,
@@ -143,7 +148,7 @@ func (t RsecDecoder) buildInputShardReaders() (r []io.Reader, size int64, err er
 	return shards, size, nil
 }
 
-func (t RsecDecoder) Decode() error {
+func (t *RsecDecoder) Decode() error {
 	// Create matrix
 	enc, err := reedsolomon.NewStream(t.dataShards, t.parityShards)
 	if err != nil {
@@ -160,6 +165,10 @@ func (t RsecDecoder) Decode() error {
 	ok, err := enc.Verify(shards)
 	if !ok {
 		log.Println("Verification failed. Reconstructing data")
+		shards, size, err = t.buildInputShardReaders()
+		if err != nil {
+			return err
+		}
 		// Create out destination writers
 		out := make([]io.Writer, len(shards))
 		for i := range out {
@@ -200,5 +209,6 @@ func (t RsecDecoder) Decode() error {
 	shards, size, err = t.buildInputShardReaders()
 	// Join the shards and write them
 	// We don't know the exact filesize.
-	return enc.Join(t.output, shards, int64(t.dataShards)*size)
+	t.outputSize = int64(t.dataShards) * size
+	return enc.Join(t.output, shards, t.outputSize)
 }
