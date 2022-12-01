@@ -143,6 +143,13 @@ func (t FileMetaInfo) MinChunkCountToDownload() (int, int) {
 	return chunkLen - parityShards, parityShards
 }
 
+func (t *FileMetaInfo) FirstFilename() string {
+	if t.UserBriefs == nil || len(t.UserBriefs) == 0 {
+		return ""
+	}
+	return string(t.UserBriefs[0].File_name)
+}
+
 // file block info
 type BlockInfo struct {
 	MinerId   types.U64

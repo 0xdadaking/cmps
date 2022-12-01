@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package node
+package filestash
 
 import (
 	"encoding/hex"
@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"cmps/configs"
+	"cmps/pkg/cessfc"
 	"cmps/pkg/chain"
 	"cmps/pkg/erasure"
 	"cmps/pkg/hashtree"
@@ -35,31 +36,30 @@ import (
 
 	"github.com/pkg/errors"
 
-	cesskeyring "github.com/CESSProject/go-keyring"
 	"github.com/centrifuge/go-substrate-rpc-client/v4/types"
 )
 
 type UploadResult struct {
-	FileHash string
-	TxHash   string
+	FileHash string `json:"fileHash"`
+	TxHash   string `json:"txHash,omitempty"`
 }
 
-func (n *Node) Upload(file *multipart.FileHeader, accountId types.AccountID) (*UploadResult, error) {
+func (t *FileStash) Upload(file *multipart.FileHeader, accountId types.AccountID) (*UploadResult, error) {
 	mpFile, err := file.Open()
 	if err != nil {
 		return nil, err
 	}
-	ccr, err := n.cutToChunks(mpFile, file.Size, accountId)
+	ccr, err := t.cutToChunks(mpFile, file.Size, accountId)
 	if err != nil {
 		return nil, err
 	}
-	dr, err := n.declareFileIfAbsent(accountId, ccr.fileHash, file.Filename)
+	dr, err := t.declareFileIfAbsent(accountId, ccr.fileHash, file.Filename)
 	if err != nil {
 		return nil, err
 	}
 	if dr.needRelay {
 		ur := &UploadRelay{
-			n,
+			t,
 			ccr.fileHash,
 			file.Filename,
 			dr.txHash,
@@ -86,8 +86,8 @@ type declareFileResult struct {
 	txHash    string
 }
 
-func (n Node) declareFileIfAbsent(accountId types.AccountID, fileHash string, originFilename string) (*declareFileResult, error) {
-	fmeta, err := n.Chain.GetFileMetaInfo(fileHash)
+func (t *FileStash) declareFileIfAbsent(accountId types.AccountID, fileHash string, originFilename string) (*declareFileResult, error) {
+	fmeta, err := t.cessc.GetFileMetaInfo(fileHash)
 	if err != nil {
 		if err.Error() != chain.ERR_Empty {
 			return nil, err
@@ -97,7 +97,7 @@ func (n Node) declareFileIfAbsent(accountId types.AccountID, fileHash string, or
 			File_name:   types.Bytes(originFilename),
 			Bucket_name: types.Bytes(configs.DEFAULT_BUCKET),
 		}
-		txHash, err := n.Chain.DeclarationFile(fileHash, userBrief)
+		txHash, err := t.cessc.DeclarationFile(fileHash, userBrief)
 		if err != nil {
 			return nil, errors.Wrap(err, "make declare file transaction failed")
 		}
@@ -115,8 +115,8 @@ type chunkCutResult struct {
 	fileHash   string
 }
 
-func (n *Node) cutToChunks(fileInput io.ReadCloser, size int64, accountId types.AccountID) (*chunkCutResult, error) {
-	chunkDir, err := os.MkdirTemp(n.ChunksDir, "up-chunks-")
+func (t *FileStash) cutToChunks(fileInput io.ReadCloser, size int64, accountId types.AccountID) (*chunkCutResult, error) {
+	chunkDir, err := os.MkdirTemp(t.chunksDir, "up-chunks-")
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (n *Node) cutToChunks(fileInput io.ReadCloser, size int64, accountId types.
 }
 
 type UploadRelay struct {
-	n             *Node
+	fileStash     *FileStash
 	fileHash      string
 	filename      string
 	declareTxHash string
@@ -223,24 +223,9 @@ func (t UploadRelay) doUpload(ch chan UploadSignal) {
 		}
 	}()
 
-	// var existFile = make([]string, 0)
-	// for i := 0; i < len(fpaths); i++ {
-	// 	_, err := os.Stat(filepath.Join(n.FileDir, fpaths[i]))
-	// 	if err != nil {
-	// 		continue
-	// 	}
-	// 	existFile = append(existFile, fpaths[i])
-	// }
-
-	msg := utils.GetRandomcode(16)
-
-	kr, err := cesskeyring.FromURI(t.n.Confile.GetCtrlPrk(), cesskeyring.NetSubstrate{})
-	if err != nil {
-		log.Println("get keyring error:", err)
-		ch <- US_FAILED
-		return
-	}
 	// sign message
+	kr := t.fileStash.keyring
+	msg := utils.GetRandomcode(16)
 	sign, err := kr.Sign(kr.SigningContext([]byte(msg)))
 	if err != nil {
 		log.Println("sign msg error:", err)
@@ -249,7 +234,7 @@ func (t UploadRelay) doUpload(ch chan UploadSignal) {
 	}
 
 	// Get all scheduler
-	schds, err := t.n.Chain.GetSchedulerList()
+	schds, err := t.fileStash.cessc.GetSchedulerList()
 	if err != nil {
 		log.Println("fetch scheduler error:", err, "retry again")
 		ch <- US_RETRY
@@ -277,8 +262,9 @@ func (t UploadRelay) doUpload(ch chan UploadSignal) {
 		}
 
 		log.Println("connect to ", tcpAddr)
-		srv := NewClient(NewTcp(conTcp), t.n.FileStashDir, t.chunkPaths)
-		err = srv.SendFile(t.fileHash, t.fileSize, t.n.Chain.GetPublicKey(), []byte(msg), sign[:])
+		srv := cessfc.NewClient(cessfc.NewTcp(conTcp), t.fileStash.Dir(), t.chunkPaths)
+		pubKey := t.fileStash.keyring.Public()
+		err = srv.SendFile(t.fileHash, t.fileSize, pubKey[:], []byte(msg), sign[:])
 		if err != nil {
 			log.Panicln("send file error:", err)
 			continue

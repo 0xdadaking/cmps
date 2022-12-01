@@ -1,32 +1,18 @@
-package node
+package cessfc
 
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/pkg/errors"
-
-	"cmps/configs"
 )
 
-type Client interface {
-	SendFile(fid string, fsize int64, pkey, signmsg, sign []byte) error
-	RecvFile(fid string, fsize int64, pkey, signmsg, sign []byte) error
-}
-
-type NetConn interface {
-	HandlerLoop()
-	GetMsg() (*Message, bool)
-	SendMsg(m *Message)
-	Close() error
-	IsClose() bool
-}
-
 type ConMgr struct {
-	conn     NetConn
+	conn     *TcpCon
 	dir      string
 	fileName string
 
@@ -63,7 +49,7 @@ func (c *ConMgr) handler() error {
 		switch m.MsgType {
 		case MsgHead:
 			switch cap(m.Bytes) {
-			case configs.TCP_ReadBuffer:
+			case TCP_ReadBuffer:
 				readBufPool.Put(m.Bytes)
 			default:
 			}
@@ -72,46 +58,49 @@ func (c *ConMgr) handler() error {
 			if recvFile == nil {
 				recvFile, err = os.OpenFile(filepath.Join(c.dir, m.FileName), os.O_RDWR|os.O_TRUNC, os.ModePerm)
 				if err != nil {
+					log.Println(err)
 					c.conn.SendMsg(NewNotifyMsg("", Status_Err))
-					time.Sleep(configs.TCP_Message_Interval)
+					time.Sleep(TCP_Message_Interval)
 					c.conn.SendMsg(NewCloseMsg("", Status_Err))
-					time.Sleep(configs.TCP_Message_Interval)
+					time.Sleep(TCP_Message_Interval)
 					return err
 				}
 			}
 			_, err = recvFile.Write(m.Bytes[:m.FileSize])
 			if err != nil {
+				log.Println(err)
 				c.conn.SendMsg(NewNotifyMsg("", Status_Err))
-				time.Sleep(configs.TCP_Message_Interval)
+				time.Sleep(TCP_Message_Interval)
 				c.conn.SendMsg(NewCloseMsg("", Status_Err))
-				time.Sleep(configs.TCP_Message_Interval)
+				time.Sleep(TCP_Message_Interval)
 				return err
 			}
 			switch cap(m.Bytes) {
-			case configs.TCP_ReadBuffer:
+			case TCP_ReadBuffer:
 				readBufPool.Put(m.Bytes)
 			default:
 			}
 		case MsgEnd:
 			switch cap(m.Bytes) {
-			case configs.TCP_ReadBuffer:
+			case TCP_ReadBuffer:
 				readBufPool.Put(m.Bytes)
 			default:
 			}
 			info, err := recvFile.Stat()
 			if err != nil {
+				log.Println(err)
 				c.conn.SendMsg(NewNotifyMsg("", Status_Err))
-				time.Sleep(configs.TCP_Message_Interval)
+				time.Sleep(TCP_Message_Interval)
 				c.conn.SendMsg(NewCloseMsg("", Status_Err))
-				time.Sleep(configs.TCP_Message_Interval)
+				time.Sleep(TCP_Message_Interval)
 				return err
 			}
 			if info.Size() != int64(m.FileSize) {
 				err = fmt.Errorf("file.size %v rece size %v \n", info.Size(), m.FileSize)
 				c.conn.SendMsg(NewNotifyMsg("", Status_Err))
-				time.Sleep(configs.TCP_Message_Interval)
+				time.Sleep(TCP_Message_Interval)
 				c.conn.SendMsg(NewCloseMsg("", Status_Err))
-				time.Sleep(configs.TCP_Message_Interval)
+				time.Sleep(TCP_Message_Interval)
 				return err
 			}
 			recvFile.Close()
@@ -120,14 +109,14 @@ func (c *ConMgr) handler() error {
 		case MsgNotify:
 			c.waitNotify <- m.Bytes[0] == byte(Status_Ok)
 			switch cap(m.Bytes) {
-			case configs.TCP_ReadBuffer:
+			case TCP_ReadBuffer:
 				readBufPool.Put(m.Bytes)
 			default:
 			}
 
 		case MsgClose:
 			switch cap(m.Bytes) {
-			case configs.TCP_ReadBuffer:
+			case TCP_ReadBuffer:
 				readBufPool.Put(m.Bytes)
 			default:
 			}
@@ -135,7 +124,7 @@ func (c *ConMgr) handler() error {
 
 		default:
 			switch cap(m.Bytes) {
-			case configs.TCP_ReadBuffer:
+			case TCP_ReadBuffer:
 				readBufPool.Put(m.Bytes)
 			default:
 			}
@@ -146,7 +135,7 @@ func (c *ConMgr) handler() error {
 	return err
 }
 
-func NewClient(conn NetConn, dir string, files []string) Client {
+func NewClient(conn *TcpCon, dir string, files []string) *ConMgr {
 	return &ConMgr{
 		conn:       conn,
 		dir:        dir,
@@ -244,7 +233,7 @@ func (c *ConMgr) recvFile(fid string, fsize int64, pkey, signmsg, sign []byte) e
 		return fmt.Errorf("wait server msg timeout")
 	}
 	c.conn.SendMsg(NewCloseMsg(fid, Status_Ok))
-	time.NewTimer(time.Second * 3)
+	//time.NewTimer(time.Second * 3)
 	return nil
 }
 

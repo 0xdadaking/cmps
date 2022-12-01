@@ -115,6 +115,7 @@ type RsecDecoder struct {
 	shardCreater ShardCreateFunc
 }
 
+func (t RsecDecoder) OutputSize() int64 { return t.outputSize }
 func (t RsecDecoder) DataShards() int   { return t.dataShards }
 func (t RsecDecoder) ParityShards() int { return t.parityShards }
 
@@ -155,6 +156,7 @@ func (t *RsecDecoder) Decode() error {
 		return err
 	}
 
+	log.Println("begin erasure decode...")
 	// Open the inputs
 	shards, size, err := t.buildInputShardReaders()
 	if err != nil {
@@ -211,4 +213,50 @@ func (t *RsecDecoder) Decode() error {
 	// We don't know the exact filesize.
 	t.outputSize = int64(t.dataShards) * size
 	return enc.Join(t.output, shards, t.outputSize)
+}
+
+const SIZE_1MiB = 1024 * 1024
+
+func reedSolomonRule(fsize int64) (int, int) {
+	if fsize <= SIZE_1MiB*2560 {
+		if fsize <= 1024 {
+			return 1, 0
+		}
+
+		if fsize <= SIZE_1MiB*8 {
+			return 2, 1
+		}
+
+		if fsize <= SIZE_1MiB*64 {
+			return 4, 2
+		}
+
+		if fsize <= SIZE_1MiB*384 {
+			return 6, 3
+		}
+
+		if fsize <= SIZE_1MiB*1024 {
+			return 8, 4
+		}
+
+		return 10, 5
+	}
+
+	if fsize <= SIZE_1MiB*6144 {
+		return 12, 6
+	}
+
+	if fsize <= SIZE_1MiB*7168 {
+		return 14, 7
+	}
+
+	if fsize <= SIZE_1MiB*8192 {
+		return 16, 8
+	}
+
+	if fsize <= SIZE_1MiB*9216 {
+		return 18, 9
+	}
+
+	return 20, 10
 }

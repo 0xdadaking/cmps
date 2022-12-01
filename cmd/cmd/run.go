@@ -20,17 +20,40 @@ import (
 	"log"
 	"math/big"
 	"os"
-	"path/filepath"
 	"time"
 
-	"cmps/configs"
-	"cmps/node"
+	"cmps/api"
+	"cmps/filestash"
 	"cmps/pkg/chain"
 	"cmps/pkg/confile"
-	"cmps/pkg/db"
-	"cmps/pkg/utils"
 
 	"github.com/spf13/cobra"
+)
+
+// account
+const (
+	// CESS token precision
+	CESSTokenPrecision = 1_000_000_000_000
+	// MinimumBalance is the minimum balance required for the program to run
+	// The unit is pico
+	MinimumBalance = 2 * CESSTokenPrecision
+	// BlockInterval is the time interval for generating blocks, in seconds
+	BlockInterval = time.Second * time.Duration(6)
+	// Time out waiting for transaction completion
+	TimeOut_WaitBlock = time.Duration(time.Second * 15)
+)
+
+// explanation
+const (
+	HELP_common = `Please check with the following help information:
+    1.Check if the wallet balance is sufficient
+    2.Block hash:`
+	HELP_register = `    3.Check the FileMap.OssRegister transaction event result in the block hash above:
+        If system.ExtrinsicFailed is prompted, it means failure;
+        If system.ExtrinsicSuccess is prompted, it means success;`
+	HELP_update = `    3.Check the FileMap.OssUpdate transaction event result in the block hash above:
+        If system.ExtrinsicFailed is prompted, it means failure;
+        If system.ExtrinsicSuccess is prompted, it means success;`
 )
 
 func init() {
@@ -39,34 +62,40 @@ func init() {
 
 // start service
 func Command_Run_Runfunc(cmd *cobra.Command, _ []string) {
-	var (
-		err  error
-		node = node.New()
-	)
+	var err error
 
 	// Building Profile Instances
-	node.Confile, err = buildConfigFile(cmd)
+	cfg, err := buildConfigFile(cmd)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 
+	n, err := api.NewNode(cfg)
+
 	//Build chain instance
-	node.Chain, err = buildChain(node.Confile, configs.TimeOut_WaitBlock)
+	n.Chain, err = buildChain(n.Confile, TimeOut_WaitBlock)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 
 	//Build Data Directory
-	err = buildDir(node)
+	err = buildDir(n)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 
+	fsth, err := filestash.NewFileStash(n.Confile.GetDataDir(), cfg, n.Chain)
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	n.FileStash = fsth
+
 	// run
-	node.Run()
+	n.Run()
 }
 
 func buildConfigFile(cmd *cobra.Command) (confile.Confiler, error) {
@@ -99,8 +128,8 @@ func buildChain(cfg confile.Confiler, timeout time.Duration) (chain.Chainer, err
 		return nil, err
 	}
 
-	if accountinfo.Data.Free.CmpAbs(new(big.Int).SetUint64(configs.MinimumBalance)) == -1 {
-		return nil, fmt.Errorf("Account balance is less than %v pico\n", configs.MinimumBalance)
+	if accountinfo.Data.Free.CmpAbs(new(big.Int).SetUint64(MinimumBalance)) == -1 {
+		return nil, fmt.Errorf("Account balance is less than %v pico\n", MinimumBalance)
 	}
 
 	// sync block
@@ -113,7 +142,7 @@ func buildChain(cfg confile.Confiler, timeout time.Duration) (chain.Chainer, err
 			break
 		}
 		log.Println("In sync block...")
-		time.Sleep(time.Second * configs.BlockInterval)
+		time.Sleep(time.Second * BlockInterval)
 	}
 	log.Println("Complete synchronization of primary network block data")
 
@@ -139,8 +168,8 @@ func register(cfg confile.Confiler, client chain.Chainer) error {
 			return fmt.Errorf("[err] Please check your wallet balance")
 		} else {
 			if txhash != "" {
-				msg := configs.HELP_common + fmt.Sprintf(" %v\n", txhash)
-				msg += configs.HELP_register
+				msg := HELP_common + fmt.Sprintf(" %v\n", txhash)
+				msg += HELP_register
 				return fmt.Errorf("[pending] %v\n", msg)
 			}
 			return err
@@ -149,8 +178,8 @@ func register(cfg confile.Confiler, client chain.Chainer) error {
 	return nil
 }
 
-func buildDir(n *node.Node) error {
-	baseDir := filepath.Join(n.Confile.GetDataDir(), configs.BaseDir)
+func buildDir(n *api.Node) error {
+	baseDir := n.Confile.GetDataDir()
 
 	_, err := os.Stat(baseDir)
 	if err != nil {
@@ -160,46 +189,6 @@ func buildDir(n *node.Node) error {
 		}
 	}
 
-	cacheDir := filepath.Join(baseDir, configs.Cache)
-	//os.RemoveAll(cacheDir)
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return err
-	}
-	//Build cache instance
-	n.Cache, err = buildCache(cacheDir)
-	if err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-
-	n.FileStashDir = filepath.Join(baseDir, configs.FileStashs)
-	//os.RemoveAll(fileDir)
-	if err := os.MkdirAll(n.FileStashDir, 0755); err != nil {
-		return err
-	}
-
-	n.ChunksDir = filepath.Join(baseDir, configs.Chunks)
-	//os.RemoveAll(fileDir)
-	if err := os.MkdirAll(n.ChunksDir, 0755); err != nil {
-		return err
-	}
-
 	log.Println(baseDir)
 	return nil
-}
-
-func buildCache(cacheDir string) (db.Cacher, error) {
-	cache, err := db.NewCache(cacheDir, 0, 0, configs.NameSpace)
-	if err != nil {
-		return nil, err
-	}
-
-	ok, err := cache.Has([]byte("SigningKey"))
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		err = cache.Put([]byte("SigningKey"), []byte(utils.GetRandomcode(16)))
-	}
-	return cache, err
 }

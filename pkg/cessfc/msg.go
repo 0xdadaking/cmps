@@ -1,10 +1,22 @@
-package node
+package cessfc
 
 import (
 	"encoding/binary"
 	"sync"
+	"time"
+)
 
-	"cmps/configs"
+const (
+	// Tcp message interval
+	TCP_Message_Interval = time.Duration(time.Millisecond * 10)
+	// Number of tcp message caches
+	TCP_Message_Send_Buffers = 10
+	TCP_Message_Read_Buffers = 10
+	//
+	TCP_SendBuffer = 8192
+	TCP_ReadBuffer = 12000
+	//
+	Tcp_Dial_Timeout = time.Duration(time.Second * 5)
 )
 
 type MsgType byte
@@ -52,13 +64,13 @@ type Notify struct {
 var (
 	sendBufPool = &sync.Pool{
 		New: func() interface{} {
-			return make([]byte, configs.TCP_SendBuffer)
+			return make([]byte, TCP_SendBuffer)
 		},
 	}
 
 	readBufPool = &sync.Pool{
 		New: func() any {
-			return make([]byte, configs.TCP_ReadBuffer)
+			return make([]byte, TCP_ReadBuffer)
 		},
 	}
 )

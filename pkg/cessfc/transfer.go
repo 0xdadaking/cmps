@@ -1,4 +1,4 @@
-package node
+package cessfc
 
 import (
 	"bytes"
@@ -9,8 +9,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"cmps/configs"
 )
 
 type TcpCon struct {
@@ -31,8 +29,8 @@ var (
 func NewTcp(conn *net.TCPConn) *TcpCon {
 	return &TcpCon{
 		conn:     conn,
-		recv:     make(chan *Message, configs.TCP_Message_Read_Buffers),
-		send:     make(chan *Message, configs.TCP_Message_Send_Buffers),
+		recv:     make(chan *Message, TCP_Message_Read_Buffers),
+		send:     make(chan *Message, TCP_Message_Send_Buffers),
 		onceStop: &sync.Once{},
 		stop:     make(chan struct{}),
 	}
@@ -62,7 +60,7 @@ func (t *TcpCon) sendMsg() {
 			}
 
 			switch cap(m.Bytes) {
-			case configs.TCP_SendBuffer:
+			case TCP_SendBuffer:
 				sendBufPool.Put(m.Bytes)
 			default:
 			}
@@ -75,7 +73,7 @@ func (t *TcpCon) sendMsg() {
 				return
 			}
 		default:
-			time.Sleep(configs.TCP_Message_Interval)
+			time.Sleep(TCP_Message_Interval)
 		}
 	}
 }
@@ -122,7 +120,7 @@ func (t *TcpCon) readMsg() {
 		msgSize := binary.BigEndian.Uint32(header)
 
 		// read data
-		if msgSize > configs.TCP_ReadBuffer {
+		if msgSize > TCP_ReadBuffer {
 			return
 		}
 
@@ -173,5 +171,3 @@ func (t *TcpCon) IsClose() bool {
 		return false
 	}
 }
-
-var _ = NetConn(&TcpCon{})

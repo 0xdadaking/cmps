@@ -20,15 +20,24 @@ import (
 	"log"
 	"os"
 
-	"cmps/configs"
-
 	"github.com/spf13/cobra"
+)
+
+const (
+	// name
+	Name = "cmps"
+	// Name space
+	NameSpace = Name
+	// version
+	Version = Name + " " + "v0.1.1"
+	// description
+	Description = "Implementation of object storage service based on cess platform"
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   configs.Name,
-	Short: configs.Description,
+	Use:   Name,
+	Short: Description,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -44,11 +53,8 @@ func Execute() {
 // init
 func init() {
 	rootCmd.AddCommand(
-		Command_Profile(),
 		Command_Version(),
 		Command_Run(),
-		Command_Update(),
-		Command_State(),
 	)
 	rootCmd.PersistentFlags().StringP("config", "c", "", "Custom profile")
 }
@@ -58,19 +64,9 @@ func Command_Version() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			log.Println(configs.Version)
+			log.Println(Version)
 			os.Exit(0)
 		},
-		DisableFlagsInUseLine: true,
-	}
-	return cc
-}
-
-func Command_Profile() *cobra.Command {
-	cc := &cobra.Command{
-		Use:                   "profile",
-		Short:                 "Generate profile template",
-		Run:                   Command_Profile_Runfunc,
 		DisableFlagsInUseLine: true,
 	}
 	return cc
@@ -81,26 +77,6 @@ func Command_Run() *cobra.Command {
 		Use:                   "run",
 		Short:                 "Running services",
 		Run:                   Command_Run_Runfunc,
-		DisableFlagsInUseLine: true,
-	}
-	return cc
-}
-
-func Command_Update() *cobra.Command {
-	cc := &cobra.Command{
-		Use:                   "update <ip> <port>",
-		Short:                 "Update information",
-		Run:                   Command_Update_Runfunc,
-		DisableFlagsInUseLine: true,
-	}
-	return cc
-}
-
-func Command_State() *cobra.Command {
-	cc := &cobra.Command{
-		Use:                   "state",
-		Short:                 "View status",
-		Run:                   Command_State_Runfunc,
 		DisableFlagsInUseLine: true,
 	}
 	return cc

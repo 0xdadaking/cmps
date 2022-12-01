@@ -1,8 +1,8 @@
-package node
+package api
 
 import (
+	"cmps/api/resp"
 	"cmps/configs"
-	"cmps/node/resp"
 	"cmps/pkg/chain"
 	"cmps/pkg/utils"
 	"net/http"
@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"log"
 	"mime/multipart"
-	"os"
-	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -84,7 +82,7 @@ func (n Node) UploadFile(c *gin.Context) {
 		return
 	}
 
-	ur, err := n.Upload(req.File, accountId)
+	ur, err := n.FileStash.Upload(req.File, accountId)
 	if err != nil {
 		resp.Error(c, err)
 		return
@@ -124,59 +122,26 @@ func (n Node) DownloadFile(c *gin.Context) {
 		return
 	}
 
-	// local cache
-	fpath := filepath.Join(n.FileStashDir, req.FileHash)
-	// _, err := os.Stat(fpath)
-	// if err == nil {
-	// 	responseForFile(c, fpath, fid)
-	// 	return
-	// }
+	skipStash := c.Query("skipStash") != ""
 
-	// file meta info
-	fmeta, err := n.Chain.GetFileMetaInfo(req.FileHash)
-	if err != nil {
-		if err.Error() == chain.ERR_Empty {
-			resp.ErrorWithHttpStatus(c, err, 404)
-
+	if !skipStash {
+		fbi, err := n.FileStash.FileInfoByHash(req.FileHash)
+		if fbi != nil && fbi.Size > 0 {
+			responseForFile(c, fbi.FilePath, fbi.OriginName)
+			return
 		} else {
-			resp.Error(c, err)
+			log.Println(err)
 		}
-		return
 	}
 
-	if string(fmeta.State) != chain.FILE_STATE_ACTIVE {
-		resp.ErrorWithHttpStatus(c, fmt.Errorf("BackingUp"), 403)
-		return
-	}
-
-	log.Printf("file meta: %v", fmeta)
-
-	filename := string(fmeta.UserBriefs[0].File_name)
-	log.Printf("file name: %v\n", filename)
-
-	fdi, err := n.downloadFile(req.FileHash, &fmeta, n.FileStashDir)
+	fbi, err := n.FileStash.DownloadFile(req.FileHash)
 	if err != nil {
 		resp.Error(c, err)
 		return
 	}
 
-	if fdi.ParityShards > 0 {
-		fstat, err := os.Stat(fpath)
-		if err != nil {
-			resp.Error(c, err)
-			return
-		}
-		if uint64(fstat.Size()) > uint64(fmeta.Size) {
-			tempfile := fpath + ".temp"
-			copyFile(fpath, tempfile, int64(fmeta.Size))
-			os.Remove(fpath)
-			os.Rename(tempfile, fpath)
-		}
-	}
-
-	log.Println("restore finished, begin response file...")
-	responseForFile(c, fpath, filename)
-	return
+	log.Println("download finished, begin response file...", fbi.FilePath)
+	responseForFile(c, fbi.FilePath, fbi.OriginName)
 }
 
 func (n Node) DeleteFile(c *gin.Context) {

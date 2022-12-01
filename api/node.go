@@ -14,36 +14,57 @@
    limitations under the License.
 */
 
-package node
+package api
 
 import (
-	"cmps/configs"
+	"cmps/filestash"
 	"cmps/pkg/chain"
 	"cmps/pkg/confile"
-	"cmps/pkg/db"
 	"log"
 	"time"
 
+	"github.com/centrifuge/go-substrate-rpc-client/v4/signature"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-type Oss interface {
-	Run()
-}
+// http
+const (
+	Header_Auth       = "Authorization"
+	Header_BucketName = "BucketName"
+	Header_Account    = "Account"
+	Header_Operation  = "Operation"
+)
 
 type Node struct {
-	Confile      confile.Confiler
-	Chain        chain.Chainer
-	Cache        db.Cacher
-	Gin          *gin.Engine
-	FileStashDir string
-	ChunksDir    string
+	Confile   confile.Confiler
+	Chain     chain.Chainer
+	Gin       *gin.Engine
+	FileStash *filestash.FileStash
+	keyring   signature.KeyringPair
 }
 
-// New is used to build a node instance
-func New() *Node {
-	return &Node{}
+// NewNode is used to build a node instance
+func NewNode(cfg confile.Confiler) (*Node, error) {
+	var n Node
+	keyring, err := signature.KeyringPairFromSecret(cfg.GetCtrlPrk(), 0)
+	if err != nil {
+		return nil, err
+	}
+	n.keyring = keyring
+	n.Confile = cfg
+	return &n, nil
+}
+
+func MustNewNode(cfg confile.Confiler) *Node {
+	var n Node
+	keyring, err := signature.KeyringPairFromSecret(cfg.GetCtrlPrk(), 0)
+	if err != nil {
+		panic(err)
+	}
+	n.keyring = keyring
+	n.Confile = cfg
+	return &n
 }
 
 func (n *Node) Run() {
@@ -53,9 +74,9 @@ func (n *Node) Run() {
 	config.AllowAllOrigins = true
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	config.AddAllowHeaders(
-		configs.Header_Auth,
-		configs.Header_Account,
-		configs.Header_BucketName,
+		Header_Auth,
+		Header_Account,
+		Header_BucketName,
 		"*",
 	)
 	n.Gin.Use(cors.New(config))

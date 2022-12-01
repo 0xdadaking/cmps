@@ -1,11 +1,15 @@
-package node
+package filestash
 
 import (
 	"cmps/pkg/chain"
 	"cmps/pkg/confile"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/centrifuge/go-substrate-rpc-client/v4/types"
+	"github.com/stretchr/testify/assert"
 )
 
 const fileId string = "d998cdd4a52fddb9cfc65e98ab42afbe2b279faf588bb1ea5b4e70ccf6db0af4"
@@ -96,19 +100,40 @@ func buildFileMeta() (fileMeta chain.FileMetaInfo) {
 	return fileMeta
 }
 
+func buildCessc(cfg confile.Confiler) chain.Chainer {
+	client, err := chain.NewChainClient(cfg.GetRpcAddr(), cfg.GetCtrlPrk(), 5*time.Second)
+	if err != nil {
+		panic(err)
+	}
+	return client
+}
+
 func TestDownloadChunk(t *testing.T) {
 	cfg := confile.NewConfigfile()
 	cfg.Parse("../conf.toml")
 	fileMeta := buildFileMeta()
-	chunkPath := figureChunkFilePath(&fileMeta, 0, cfg.GetDataDir())
-	n := New()
-	n.doDownloadChunk(chunkPath, &fileMeta.BlockInfo[0])
+	fsth := MustNewFileStash(cfg.GetDataDir(), cfg, buildCessc(cfg))
+
+	tmpChunkDir, err := os.MkdirTemp(fsth.chunksDir, "down-chunks-")
+	assert.NoError(t, err)
+	defer os.RemoveAll(tmpChunkDir)
+	err = fsth.doDownloadChunk(&fileMeta.BlockInfo[0], tmpChunkDir)
+	assert.NoError(t, err)
+
+	fstat, err := os.Stat(filepath.Join(tmpChunkDir, fileMeta.BlockInfo[0].BlockId.String()))
+	assert.NoError(t, err)
+	assert.Equal(t, int64(fileMeta.BlockInfo[0].BlockSize), fstat.Size())
 }
 
 func TestDownloadFile(t *testing.T) {
 	cfg := confile.NewConfigfile()
 	cfg.Parse("../conf.toml")
 	fileMeta := buildFileMeta()
-	n := New()
-	n.downloadFile(fileId, &fileMeta, cfg.GetDataDir())
+	fsth := MustNewFileStash(cfg.GetDataDir(), cfg, buildCessc(cfg))
+
+	fbi, err := fsth.downloadFile(fileId, &fileMeta)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(fileMeta.Size), fbi.Size)
+
+	os.RemoveAll(fsth.Dir())
 }
