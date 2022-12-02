@@ -68,18 +68,19 @@ func (t *FileStash) Upload(file *multipart.FileHeader, accountId types.AccountID
 			file.Filename,
 			dr.txHash,
 			file.Size,
+			ccr.chunkDir,
 			ccr.chunkPaths,
 			accountId,
 		}
 		go ur.relayUpload()
 	} else {
-		go cleanChunks(ccr)
+		go cleanChunks(ccr.chunkDir)
 	}
 	return &UploadResult{ccr.fileHash, dr.txHash}, nil
 }
 
-func cleanChunks(ccr *chunkCutResult) {
-	err := os.RemoveAll(ccr.chunkDir)
+func cleanChunks(chunkDir string) {
+	err := os.RemoveAll(chunkDir)
 	if err != nil {
 		log.Println("remove chunk dir error:", err)
 	}
@@ -178,7 +179,11 @@ func (t *FileStash) cutToChunks(fileInput io.ReadCloser, size int64, accountId t
 	// Rename the file and chunks with root hash
 	chunkPaths := make([]string, len(cps))
 	for i, cp := range cps {
-		chunkPaths[i] = cp.Name()
+		newPath := filepath.Join(chunkDir, fmt.Sprintf("%s.%03d", fileHash, i))
+		if err := os.Rename(cp.Name(), newPath); err != nil {
+			return nil, errors.Wrap(err, "rename chunk file error")
+		}
+		chunkPaths[i] = newPath
 	}
 	return &chunkCutResult{chunkDir, chunkPaths, fileHash}, nil
 }
@@ -189,6 +194,7 @@ type UploadRelay struct {
 	filename      string
 	declareTxHash string
 	fileSize      int64
+	chunkDir      string
 	chunkPaths    []string
 	accountId     types.AccountID
 }
@@ -219,10 +225,12 @@ func (t UploadRelay) relayUpload() {
 			}
 			if result == US_OK {
 				log.Printf("File [%v] relay upload successfully\n", t.fileHash)
+				cleanChunks(t.chunkDir)
 				return
 			}
 			if result == US_FAILED {
 				log.Printf("File [%v] relay upload failed\n", t.fileHash)
+				cleanChunks(t.chunkDir)
 				return
 			}
 		}
@@ -233,8 +241,8 @@ func (t UploadRelay) doUpload(ch chan UploadSignal) {
 	defer func() {
 		err := recover()
 		if err != nil {
-			ch <- 1
-			log.Println(err)
+			ch <- US_RETRY
+			log.Println("send file error:", err)
 		}
 	}()
 
@@ -285,7 +293,6 @@ func (t UploadRelay) doUpload(ch chan UploadSignal) {
 			continue
 		}
 		ch <- US_OK
-		log.Panicln("send files finish")
 		return
 	}
 	ch <- US_RETRY

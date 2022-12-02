@@ -172,8 +172,9 @@ func (c *ConMgr) sendFile(fid string, fsize int64, pkey, signmsg, sign []byte) e
 	var err error
 	var lastmatrk bool
 
-	for i := 0; i < len(c.sendFiles); i++ {
-		if (i + 1) == len(c.sendFiles) {
+	n := len(c.sendFiles)
+	for i := 0; i < n; i++ {
+		if (i + 1) == n {
 			lastmatrk = true
 		}
 		//err = c.sendSingleFile(filepath.Join(c.dir, c.sendFiles[i]), fid, fsize, lastmatrk, pkey, signmsg, sign)
@@ -251,7 +252,7 @@ func (c *ConMgr) sendSingleFile(filePath string, fid string, fsize int64, lastma
 	}()
 	fileInfo, _ := file.Stat()
 
-	//log.Println("Ready to write file: ", filePath)
+	log.Println("Ready to send file: ", filePath)
 	c.conn.SendMsg(NewHeadMsg(fileInfo.Name(), fid, lastmark, pkey, signmsg, sign))
 
 	timerHead := time.NewTimer(10 * time.Second)
@@ -297,6 +298,6 @@ func (c *ConMgr) sendSingleFile(filePath string, fid string, fsize int64, lastma
 	case <-timerFile.C:
 		return fmt.Errorf("wait server msg timeout")
 	}
-
+	log.Println("finish send file", filePath)
 	return nil
 }
