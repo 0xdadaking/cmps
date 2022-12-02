@@ -53,6 +53,10 @@ func (t *FileStash) Upload(file *multipart.FileHeader, accountId types.AccountID
 	if err != nil {
 		return nil, err
 	}
+	_, err = t.createBucketIfAbsent(accountId)
+	if err != nil {
+		return nil, errors.Wrap(err, "create bucket error")
+	}
 	dr, err := t.declareFileIfAbsent(accountId, ccr.fileHash, file.Filename)
 	if err != nil {
 		return nil, err
@@ -79,6 +83,17 @@ func cleanChunks(ccr *chunkCutResult) {
 	if err != nil {
 		log.Println("remove chunk dir error:", err)
 	}
+}
+
+func (t *FileStash) createBucketIfAbsent(accountId types.AccountID) (string, error) {
+	_, err := t.cessc.GetBucketInfo(accountId[:], configs.DEFAULT_BUCKET)
+	if err != nil {
+		log.Println("get bucket info error:", err)
+		txHash, err := t.cessc.CreateBucket(accountId[:], configs.DEFAULT_BUCKET)
+		log.Println("create bucket tx:", txHash)
+		return txHash, err
+	}
+	return "", nil
 }
 
 type declareFileResult struct {
