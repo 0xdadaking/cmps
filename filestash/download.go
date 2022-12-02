@@ -147,39 +147,3 @@ func (t *FileStash) doDownloadChunk(chunk *chain.BlockInfo, tmpChunkDir string) 
 	log.Printf("end download chunk: %s, cost: %dms \n", chunk.BlockId.String(), time.Since(start).Milliseconds())
 	return err
 }
-
-func copyFile(src, dst string, length int64) error {
-	srcfile, err := os.OpenFile(src, os.O_RDONLY, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	defer srcfile.Close()
-	dstfile, err := os.OpenFile(src, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	defer dstfile.Close()
-
-	var buf = make([]byte, 64*1024)
-	var count int64
-	for {
-		n, err := srcfile.Read(buf)
-		if err != nil && err != io.EOF {
-			return err
-		}
-		if n == 0 {
-			break
-		}
-		count += int64(n)
-		if count < length {
-			dstfile.Write(buf[:n])
-		} else {
-			tail := count - length
-			if n >= int(tail) {
-				dstfile.Write(buf[:(n - int(tail))])
-			}
-		}
-	}
-
-	return nil
-}
