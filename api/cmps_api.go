@@ -44,7 +44,7 @@ type (
 
 	FileDeleteReq struct {
 		FileHashOnlyReq
-		WalletAddress string `form:"walletAddress" binding:"required"`
+		WalletAddress string `json:"walletAddress" form:"walletAddress" binding:"required"`
 	}
 )
 
