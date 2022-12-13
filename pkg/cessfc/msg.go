@@ -19,6 +19,21 @@ const (
 	Tcp_Dial_Timeout = time.Duration(time.Second * 5)
 )
 
+type FileStoreInfo struct {
+	FileId      string         `json:"file_id"`
+	FileState   string         `json:"file_state"`
+	FileSize    int64          `json:"file_size"`
+	IsUpload    bool           `json:"is_upload"`
+	IsCheck     bool           `json:"is_check"`
+	IsShard     bool           `json:"is_shard"`
+	IsScheduler bool           `json:"is_scheduler"`
+	Miners      map[int]string `json:"miners"`
+}
+
+type FileStoreInfoReceiver interface {
+	Receive(fsi *FileStoreInfo)
+}
+
 type MsgType byte
 
 const (
@@ -30,6 +45,7 @@ const (
 	MsgClose
 	MsgRecvHead
 	MsgRecvFile
+	MsgFileSt
 )
 
 const (
@@ -180,5 +196,20 @@ func NewCloseMsg(fileName string, status Status) *Message {
 	m.Pubkey = nil
 	m.SignMsg = nil
 	m.Sign = nil
+	return m
+}
+
+func NewFileStMsg(fid string) *Message {
+	m := &Message{}
+	m.MsgType = MsgFileSt
+	m.FileName = ""
+	m.FileHash = fid
+	m.FileSize = 0
+	m.LastMark = false
+	m.FileType = FileType_file
+	m.Pubkey = nil
+	m.SignMsg = nil
+	m.Sign = nil
+	m.Bytes = nil
 	return m
 }

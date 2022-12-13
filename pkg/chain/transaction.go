@@ -17,6 +17,7 @@
 package chain
 
 import (
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -718,6 +719,7 @@ func (c *chainClient) DeleteFile(owner_pkey []byte, filehash string) (string, er
 		return txhash, errors.Wrap(err, "[Sign]")
 	}
 
+	log.Println("begin submit extrinsic...")
 	// Do the transfer and track the actual status
 	sub, err := c.api.RPC.Author.SubmitAndWatchExtrinsic(ext)
 	if err != nil {
@@ -744,6 +746,7 @@ func (c *chainClient) DeleteFile(owner_pkey []byte, filehash string) (string, er
 	}
 	defer sub.Unsubscribe()
 	timeout := time.After(c.timeForBlockOut)
+	log.Println("extrinsic submit, wait for blocking...")
 	for {
 		select {
 		case status := <-sub.Chan():

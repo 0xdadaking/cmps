@@ -1,6 +1,7 @@
 package cessfc
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,8 @@ type ConMgr struct {
 
 	waitNotify chan bool
 	stop       chan struct{}
+
+	fsiReceiver FileStoreInfoReceiver
 }
 
 func (c *ConMgr) handler() error {
@@ -29,7 +32,7 @@ func (c *ConMgr) handler() error {
 	)
 
 	defer func() {
-		recover()
+		//recover()
 		c.conn.Close()
 		close(c.waitNotify)
 		if recvFile != nil {
@@ -54,6 +57,20 @@ func (c *ConMgr) handler() error {
 			default:
 			}
 			c.conn.SendMsg(NewNotifyMsg(c.fileName, Status_Ok))
+
+		case MsgFileSt:
+			if m.Bytes != nil && len(m.Bytes) > 0 {
+				var fsi FileStoreInfo
+				err := json.Unmarshal(m.Bytes, &fsi)
+				if err != nil {
+					log.Printf("json unmarshal MsgFileSt.Bytes error:%v, msg.Bytes:%s", err, m.Bytes)
+					continue
+				}
+				if c.fsiReceiver != nil {
+					go c.fsiReceiver.Receive(&fsi)
+				}
+			}
+
 		case MsgFile:
 			if recvFile == nil {
 				recvFile, err = os.OpenFile(filepath.Join(c.dir, m.FileName), os.O_RDWR|os.O_TRUNC, os.ModePerm)
@@ -145,6 +162,10 @@ func NewClient(conn *TcpCon, dir string, files []string) *ConMgr {
 	}
 }
 
+func (c *ConMgr) SetFsiReceiver(fsiReceiver FileStoreInfoReceiver) {
+	c.fsiReceiver = fsiReceiver
+}
+
 func (c *ConMgr) SendFile(fid string, fsize int64, pkey, signmsg, sign []byte) error {
 	c.conn.HandlerLoop()
 	go func() {
@@ -177,14 +198,10 @@ func (c *ConMgr) sendFile(fid string, fsize int64, pkey, signmsg, sign []byte) e
 		if (i + 1) == n {
 			lastmatrk = true
 		}
-		//err = c.sendSingleFile(filepath.Join(c.dir, c.sendFiles[i]), fid, fsize, lastmatrk, pkey, signmsg, sign)
 		err = c.sendSingleFile(c.sendFiles[i], fid, fsize, lastmatrk, pkey, signmsg, sign)
 		if err != nil {
 			return err
 		}
-		// if strings.Contains(c.sendFiles[i], ".") {
-		// 	os.Remove(filepath.Join(c.dir, c.sendFiles[i]))
-		// }
 	}
 
 	c.conn.SendMsg(NewCloseMsg(c.fileName, Status_Ok))
@@ -204,7 +221,7 @@ func (c *ConMgr) recvFile(fid string, fsize int64, pkey, signmsg, sign []byte) e
 	select {
 	case ok := <-c.waitNotify:
 		if !ok {
-			return fmt.Errorf("send err")
+			return fmt.Errorf("receive server failed WaitNotify Msg")
 		}
 	case <-timerHead.C:
 		return fmt.Errorf("wait server msg timeout")
@@ -238,39 +255,48 @@ func (c *ConMgr) recvFile(fid string, fsize int64, pkey, signmsg, sign []byte) e
 	return nil
 }
 
+func (c *ConMgr) rpcStyleSendMsg(fn func() error, timeoutBySeconds int, msg string) error {
+	if err := fn(); err != nil {
+		return err
+	}
+	log.Printf("%s has sent, wait for server response...", msg)
+	timer := time.NewTimer(time.Duration(timeoutBySeconds) * time.Second)
+	defer timer.Stop()
+	select {
+	case ok := <-c.waitNotify:
+		if !ok {
+			return errors.Errorf("receive server WaitNotify error for msg:%s", msg)
+		}
+	case <-timer.C:
+		return errors.Errorf("wait server response timeout:%d seconds for msg:%s", timeoutBySeconds, msg)
+	}
+	return nil
+}
+
 func (c *ConMgr) sendSingleFile(filePath string, fid string, fsize int64, lastmark bool, pkey, signmsg, sign []byte) error {
 	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Printf("open file err %v \n", err)
+		log.Printf("open file err %v \n", err)
 		return err
 	}
-
 	defer func() {
 		if file != nil {
 			_ = file.Close()
 		}
 	}()
+
+	log.Println("🙌 Ready to send file:", filePath)
 	fileInfo, _ := file.Stat()
-
-	log.Println("Ready to send file: ", filePath)
-	c.conn.SendMsg(NewHeadMsg(fileInfo.Name(), fid, lastmark, pkey, signmsg, sign))
-
-	timerHead := time.NewTimer(10 * time.Second)
-	defer timerHead.Stop()
-	select {
-	case ok := <-c.waitNotify:
-		if !ok {
-			return fmt.Errorf("send err")
-		}
-	case <-timerHead.C:
-		return fmt.Errorf("wait server msg timeout")
-	}
+	c.rpcStyleSendMsg(func() error {
+		c.conn.SendMsg(NewHeadMsg(fileInfo.Name(), fid, lastmark, pkey, signmsg, sign))
+		return nil
+	}, 10, "HeadMsg")
 
 	readBuf := sendBufPool.Get().([]byte)
 	defer func() {
 		sendBufPool.Put(readBuf)
 	}()
-
+	log.Println("head msg completed, begin transfer file content...")
 	for !c.conn.IsClose() {
 		n, err := file.Read(readBuf)
 		if err != nil && err != io.EOF {
@@ -282,22 +308,25 @@ func (c *ConMgr) sendSingleFile(filePath string, fid string, fsize int64, lastma
 		c.conn.SendMsg(NewFileMsg(c.fileName, n, readBuf[:n]))
 	}
 
-	c.conn.SendMsg(NewEndMsg(c.fileName, fid, uint64(fileInfo.Size()), uint64(fsize), lastmark))
+	log.Println("file content transfered, begin send end msg")
 	waitTime := fileInfo.Size() / 1024 / 10
 	if waitTime < 10 {
 		waitTime = 10
 	}
+	c.rpcStyleSendMsg(func() error {
+		c.conn.SendMsg(NewEndMsg(c.fileName, fid, uint64(fileInfo.Size()), uint64(fsize), lastmark))
+		return nil
+	}, int(waitTime), "EndMsg")
 
-	timerFile := time.NewTimer(time.Second * time.Duration(waitTime))
-	defer timerFile.Stop()
-	select {
-	case ok := <-c.waitNotify:
-		if !ok {
-			return fmt.Errorf("send err")
-		}
-	case <-timerFile.C:
-		return fmt.Errorf("wait server msg timeout")
+	if c.fsiReceiver != nil {
+		c.sendFileSt(fid)
 	}
-	log.Println("finish send file", filePath)
 	return nil
+}
+
+func (c *ConMgr) sendFileSt(fid string) error {
+	return c.rpcStyleSendMsg(func() error {
+		c.conn.SendMsg(NewFileStMsg(fid))
+		return nil
+	}, 3, "FileStMsg")
 }

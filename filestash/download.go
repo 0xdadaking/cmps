@@ -21,7 +21,6 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -127,20 +126,16 @@ func (t *FileStash) doDownloadChunk(chunk *chain.BlockInfo, tmpChunkDir string) 
 	}
 
 	start = time.Now()
-	tcpAddr, err := net.ResolveTCPAddr("tcp", chunk.MinerIp.String())
+	address := chunk.MinerIp.String()
+	conn, err := cessfc.Dial(address, time.Second*5)
 	if err != nil {
+		log.Println("dial address", address, "error:", err)
 		return err
 	}
-	log.Printf("resolve address cost: %dus", time.Since(start).Microseconds())
+	log.Printf("%s connected for download", address)
+	log.Printf("dial to address %s cost: %dus", address, time.Since(start).Microseconds())
 
-	start = time.Now()
-	conTcp, err := net.DialTCP("tcp", nil, tcpAddr)
-	log.Printf("dial to address %s cost: %dus", tcpAddr, time.Since(start).Microseconds())
-	if err != nil {
-		return err
-	}
-
-	srv := cessfc.NewClient(cessfc.NewTcp(conTcp), tmpChunkDir, nil)
+	srv := cessfc.NewClient(conn, tmpChunkDir, nil)
 	pubKey := t.keyring.Public()
 	start = time.Now()
 	err = srv.RecvFile(chunk.BlockId.String(), int64(chunk.BlockSize), pubKey[:], []byte(msg), sign[:])

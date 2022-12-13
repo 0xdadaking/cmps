@@ -21,7 +21,6 @@ import (
 	"cmps/pkg/chain"
 	"cmps/pkg/confile"
 	"log"
-	"time"
 
 	"github.com/centrifuge/go-substrate-rpc-client/v4/signature"
 	"github.com/gin-contrib/cors"
@@ -81,28 +80,9 @@ func (n *Node) Run() {
 	)
 	n.Gin.Use(cors.New(config))
 
-	n.Gin.Use(ginLoggerToConsole)
 	// Add route
 	n.addRoute()
 	// Run
 	log.Println("http server listener on", n.Confile.GetServicePort())
 	n.Gin.Run(":" + n.Confile.GetServicePort())
-}
-
-func ginLoggerToConsole(c *gin.Context) {
-	startTime := time.Now()               // start time
-	c.Next()                              // Handling the Request
-	endTime := time.Now()                 // end time
-	latencyTime := endTime.Sub(startTime) // execution time
-	reqMethod := c.Request.Method         // request method
-	reqUri := c.Request.RequestURI        // required parameter
-	statusCode := c.Writer.Status()       // status code
-	clientIP := c.ClientIP()              // IP
-	log.Printf(" %13v | %15s | %7s | %3d | %s \n",
-		latencyTime,
-		clientIP,
-		reqMethod,
-		statusCode,
-		reqUri,
-	)
 }

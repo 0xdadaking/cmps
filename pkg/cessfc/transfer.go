@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 type TcpCon struct {
@@ -26,14 +29,31 @@ var (
 	HEAD_FILLER = []byte("c101")
 )
 
-func NewTcp(conn *net.TCPConn) *TcpCon {
+func Dial(address string, timeout time.Duration) (*TcpCon, error) {
+	netConn, err := doDial("tcp", address, timeout)
+	if err != nil {
+		return nil, err
+	}
+	conTcp, ok := netConn.(*net.TCPConn)
+	if !ok {
+		return nil, errors.New("network conversion failed")
+	}
 	return &TcpCon{
-		conn:     conn,
+		conn:     conTcp,
 		recv:     make(chan *Message, TCP_Message_Read_Buffers),
 		send:     make(chan *Message, TCP_Message_Send_Buffers),
 		onceStop: &sync.Once{},
 		stop:     make(chan struct{}),
+	}, nil
+}
+
+func doDial(network string, address string, timeout time.Duration) (net.Conn, error) {
+	tcpAddr, err := net.ResolveTCPAddr(network, address)
+	if err != nil {
+		return nil, err
 	}
+	dialer := net.Dialer{Timeout: timeout}
+	return dialer.Dial(network, tcpAddr.String())
 }
 
 func (t *TcpCon) HandlerLoop() {
@@ -44,9 +64,10 @@ func (t *TcpCon) HandlerLoop() {
 func (t *TcpCon) sendMsg() {
 	sendBuf := readBufPool.Get().([]byte)
 	defer func() {
-		recover()
+		// recover()
 		t.Close()
 		time.Sleep(time.Second)
+		log.Println("close send chan")
 		close(t.send)
 		readBufPool.Put(sendBuf)
 	}()
@@ -56,6 +77,7 @@ func (t *TcpCon) sendMsg() {
 		case m := <-t.send:
 			data, err := json.Marshal(m)
 			if err != nil {
+				log.Println("json marshal Message error:", err)
 				return
 			}
 
@@ -70,6 +92,7 @@ func (t *TcpCon) sendMsg() {
 
 			_, err = t.conn.Write(sendBuf[:len(HEAD_FILE)+4+len(data)])
 			if err != nil {
+				log.Printf("write data error:%v", err)
 				return
 			}
 		default:
@@ -86,7 +109,7 @@ func (t *TcpCon) readMsg() {
 	)
 	readBuf := readBufPool.Get().([]byte)
 	defer func() {
-		recover()
+		// recover()
 		t.Close()
 		close(t.recv)
 		readBufPool.Put(readBuf)
@@ -159,6 +182,7 @@ func (t *TcpCon) Close() error {
 	t.onceStop.Do(func() {
 		t.conn.Close()
 		close(t.stop)
+		log.Println("connection closed")
 	})
 	return nil
 }

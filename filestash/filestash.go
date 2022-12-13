@@ -17,6 +17,9 @@ type FileStash struct {
 	chunksDir    string
 	keyring      *cesskeyring.KeyRing
 	cessc        chain.Chainer
+
+	relayHandlers       map[int64]*RelayHandler
+	relayHandlerPutChan chan *RelayHandler
 }
 
 const (
@@ -40,10 +43,12 @@ func MustNewFileStash(parentDir string, cfg confile.Confiler, cessc chain.Chaine
 		panic(err)
 	}
 	return &FileStash{
-		fileStashDir: fsd,
-		chunksDir:    ckd,
-		keyring:      keyring,
-		cessc:        cessc,
+		fileStashDir:        fsd,
+		chunksDir:           ckd,
+		keyring:             keyring,
+		cessc:               cessc,
+		relayHandlers:       make(map[int64]*RelayHandler),
+		relayHandlerPutChan: make(chan *RelayHandler),
 	}
 }
 
@@ -62,10 +67,12 @@ func NewFileStash(parentDir string, cfg confile.Confiler, cessc chain.Chainer) (
 		return nil, err
 	}
 	fsth := &FileStash{
-		fileStashDir: fsd,
-		chunksDir:    ckd,
-		keyring:      keyring,
-		cessc:        cessc,
+		fileStashDir:        fsd,
+		chunksDir:           ckd,
+		keyring:             keyring,
+		cessc:               cessc,
+		relayHandlers:       make(map[int64]*RelayHandler),
+		relayHandlerPutChan: make(chan *RelayHandler),
 	}
 	return fsth, nil
 }
@@ -129,6 +136,17 @@ func (t *FileStash) storeSimpleFileMeta(sfm *SimpleFileMeta) error {
 		return err
 	}
 	return nil
+}
+
+func (t *FileStash) ensureFileHashDir(fileHash string) (string, error) {
+	fileHashDir := filepath.Join(t.fileStashDir, fileHash)
+	if _, err := os.Stat(fileHashDir); os.IsNotExist(err) {
+		err = os.Mkdir(fileHashDir, 0755)
+		if err != nil {
+			return "", err
+		}
+	}
+	return fileHashDir, nil
 }
 
 func (t *FileStash) DownloadFile(fileHash string) (*FileBriefInfo, error) {
