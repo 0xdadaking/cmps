@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	cesskeyring "github.com/CESSProject/go-keyring"
 	"github.com/pkg/errors"
@@ -28,28 +29,17 @@ const (
 	_MetaFilename     = "meta.json"
 )
 
-func MustNewFileStash(parentDir string, cfg confile.Confiler, cessc chain.Chainer) *FileStash {
-	keyring, err := cesskeyring.FromURI(cfg.GetCtrlPrk(), cesskeyring.NetSubstrate{})
+var Must _must
+
+type _must struct {
+}
+
+func (t _must) NewFileStash(parentDir string, cfg confile.Confiler, cessc chain.Chainer) *FileStash {
+	fs, err := NewFileStash(parentDir, cfg, cessc)
 	if err != nil {
 		panic(err)
 	}
-
-	fsd := filepath.Join(parentDir, _FileStashDirName)
-	if err := os.MkdirAll(fsd, 0755); err != nil {
-		panic(err)
-	}
-	ckd := filepath.Join(parentDir, _FileStashDirName, ".chunks")
-	if err := os.MkdirAll(ckd, 0755); err != nil {
-		panic(err)
-	}
-	return &FileStash{
-		fileStashDir:        fsd,
-		chunksDir:           ckd,
-		keyring:             keyring,
-		cessc:               cessc,
-		relayHandlers:       make(map[int64]*RelayHandler),
-		relayHandlerPutChan: make(chan *RelayHandler),
-	}
+	return fs
 }
 
 func NewFileStash(parentDir string, cfg confile.Confiler, cessc chain.Chainer) (*FileStash, error) {
@@ -74,7 +64,24 @@ func NewFileStash(parentDir string, cfg confile.Confiler, cessc chain.Chainer) (
 		relayHandlers:       make(map[int64]*RelayHandler),
 		relayHandlerPutChan: make(chan *RelayHandler),
 	}
+	startCleanCompleteRelayHandlerTask(fsth)
 	return fsth, nil
+}
+
+func startCleanCompleteRelayHandlerTask(fsth *FileStash) {
+	go func() {
+		for {
+			for k, rh := range fsth.relayHandlers {
+				if time.Now().After(rh.completeTime.Add(5 * time.Second)) {
+					rh.close()
+					delete(fsth.relayHandlers, k)
+					log.Printf("clean relay handler:%d", rh.Id())
+				}
+				time.Sleep(time.Second)
+			}
+			time.Sleep(time.Second)
+		}
+	}()
 }
 
 func (t *FileStash) Dir() string { return t.fileStashDir }

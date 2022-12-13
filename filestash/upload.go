@@ -24,7 +24,10 @@ import (
 	"github.com/centrifuge/go-substrate-rpc-client/v4/types"
 )
 
-const _FINISH_STEP = "finish"
+const (
+	_FINISH_STEP = "finish"
+	_ABORT_STEP  = "abort"
+)
 
 var (
 	ErrFileOnPending = errors.New("the file of uploaded is pending")
@@ -122,8 +125,10 @@ type RelayHandler struct {
 	fileStashDir string
 	chunksDir    string
 
+	storageMiners   []string
 	currentProgress Progress
 	progressChan    chan Progress
+	completeTime    time.Time
 }
 
 func (t *RelayHandler) Id() int64 { return t.id }
@@ -143,7 +148,7 @@ func (t *RelayHandler) pushProgress(step string, arg ...any) {
 		} else if msg, ok := arg[0].(string); ok {
 			p.Msg = msg
 		} else {
-			p.Data = arg
+			p.Data = arg[0]
 		}
 	}
 	t.currentProgress = p
@@ -153,11 +158,18 @@ func (t *RelayHandler) pushProgress(step string, arg ...any) {
 	}
 }
 
+func (t *RelayHandler) close() {
+	if t.progressChan != nil {
+		close(t.progressChan)
+	}
+}
+
 func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.FileHeader, accountId types.AccountID, forceUploadIfPending bool) (retErr error) {
 	defer openedMpFile.Close()
 	defer func() {
 		if retErr != nil {
-			t.pushProgress("abort", retErr)
+			t.completeTime = time.Now()
+			t.pushProgress(_ABORT_STEP, retErr)
 		}
 	}()
 
@@ -166,6 +178,8 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 	if err != nil {
 		return errors.Wrap(err, "shard file error")
 	}
+	defer cleanChunks(ccr.chunkDir)
+	t.pushProgress("sharded", map[string]string{"fileHash": ccr.fileHash})
 
 	t.pushProgress("bucketing")
 	if _, err := t.createBucketIfAbsent(accountId); err != nil {
@@ -190,11 +204,33 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 			accountId,
 		})
 	} else {
-		t.pushProgress("thunder")
-		cleanChunks(ccr.chunkDir)
+		miners, err := queryFileStoredMiners(ccr.fileHash, t.cessc)
+		if err != nil {
+			t.pushProgress("thunder", map[string]string{"error": err.Error()})
+		} else {
+			t.pushProgress("thunder", makeMinersForProgress(miners))
+		}
 	}
 	t.pushProgress(_FINISH_STEP)
+	t.completeTime = time.Now()
 	return nil
+}
+
+func queryFileStoredMiners(fileHash string, cessc chain.Chainer) ([]string, error) {
+	var err error
+	fmeta, err := cessc.GetFileMetaInfo(fileHash)
+	if err != nil {
+		return nil, err
+	}
+	miners := make([]string, len(fmeta.BlockInfo))
+	for i, b := range fmeta.BlockInfo {
+		miners[i], err = utils.EncodePublicKeyAsCessAccount(b.MinerAcc[:])
+		if err != nil {
+			log.Println("encode account error:", err)
+			continue
+		}
+	}
+	return miners, nil
 }
 
 func (t *RelayHandler) createBucketIfAbsent(accountId types.AccountID) (string, error) {
@@ -384,5 +420,15 @@ func (t *RelayHandler) tryUpload(rctx *RelayContext, msg string, sign []byte, sc
 }
 
 func (t *RelayHandler) Receive(fsi *cessfc.FileStoreInfo) {
-	t.pushProgress("uploading", fsi.Miners)
+	if fsi.Miners != nil && len(fsi.Miners) > 0 {
+		t.storageMiners = make([]string, 0, len(fsi.Miners))
+		for _, v := range fsi.Miners {
+			t.storageMiners = append(t.storageMiners, v)
+		}
+		t.pushProgress("uploading", makeMinersForProgress(t.storageMiners))
+	}
+}
+
+func makeMinersForProgress(miners []string) map[string][]string {
+	return map[string][]string{"miners": miners}
 }

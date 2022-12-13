@@ -112,7 +112,7 @@ func TestDownloadChunk(t *testing.T) {
 	cfg := confile.NewConfigfile()
 	cfg.Parse("../conf.toml")
 	fileMeta := buildFileMeta()
-	fsth := MustNewFileStash(cfg.GetDataDir(), cfg, buildCessc(cfg))
+	fsth := Must.NewFileStash(cfg.GetDataDir(), cfg, buildCessc(cfg))
 
 	tmpChunkDir, err := os.MkdirTemp(fsth.chunksDir, "down-chunks-")
 	assert.NoError(t, err)
@@ -129,7 +129,7 @@ func TestDownloadFile(t *testing.T) {
 	cfg := confile.NewConfigfile()
 	cfg.Parse("../conf.toml")
 	fileMeta := buildFileMeta()
-	fsth := MustNewFileStash(cfg.GetDataDir(), cfg, buildCessc(cfg))
+	fsth := Must.NewFileStash(cfg.GetDataDir(), cfg, buildCessc(cfg))
 
 	fbi, err := fsth.downloadFile(fileId, &fileMeta)
 	assert.NoError(t, err)
