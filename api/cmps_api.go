@@ -3,6 +3,7 @@ package api
 import (
 	"cmps/api/resp"
 	"cmps/configs"
+	"cmps/filestash"
 	"cmps/pkg/chain"
 	"cmps/pkg/utils"
 	"net/http"
@@ -103,6 +104,18 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+type LupMsgType int
+
+const (
+	LMT_STATE LupMsgType = 0 + iota
+	LMT_PROGRESS
+)
+
+type LupMsg struct {
+	Type LupMsgType `json:"type"`
+	Msg  any        `json:"msg"`
+}
+
 func (n Node) ListenerUploadProgress(c *gin.Context) {
 	var f UploadStateReq
 	if err := c.ShouldBindUri(&f); err != nil {
@@ -122,8 +135,22 @@ func (n Node) ListenerUploadProgress(c *gin.Context) {
 	}
 	defer ws.Close()
 
+	pushMsgForRelayHandler(ws, rh)
+	log.Println("websocket listener finish")
+}
+
+func pushMsgForRelayHandler(ws *websocket.Conn, rh *filestash.RelayHandler) {
+	err := ws.WriteJSON(LupMsg{LMT_STATE, rh.State()})
+	if err != nil {
+		log.Printf("write relay handler state to websocket error: %+v", err)
+		return
+	}
 	for p := range rh.ListenerProgress() {
-		ws.WriteJSON(p)
+		err = ws.WriteJSON(LupMsg{LMT_PROGRESS, p})
+		if err != nil {
+			log.Printf("write relay handler progress to websocket error: %+v", err)
+			return
+		}
 		if p.IsComplete() {
 			break
 		}
@@ -132,7 +159,6 @@ func (n Node) ListenerUploadProgress(c *gin.Context) {
 			break
 		}
 	}
-	log.Println("websocket listener finish")
 }
 
 func (n Node) DebugUploadProgress(c *gin.Context) {
@@ -145,16 +171,7 @@ func (n Node) DebugUploadProgress(c *gin.Context) {
 
 	ws.WriteMessage(websocket.TextMessage, []byte("waiting for file upload..."))
 	for rh := range n.FileStash.AnyRelayHandler() {
-		for p := range rh.ListenerProgress() {
-			ws.WriteJSON(p)
-			if p.IsComplete() {
-				break
-			}
-			if p.IsAbort() {
-				log.Println("progress abort error:", p.Error)
-				break
-			}
-		}
+		pushMsgForRelayHandler(ws, rh)
 	}
 	log.Println("websocket listener finish")
 }
@@ -229,5 +246,6 @@ func (n Node) DeleteFile(c *gin.Context) {
 		resp.Error(c, err)
 		return
 	}
+	n.FileStash.RemoveFile(req.FileHash)
 	resp.Ok(c, txHash)
 }

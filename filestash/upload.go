@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"cmps/configs"
@@ -51,7 +52,7 @@ func (t Progress) String() string {
 }
 func (t Progress) MarshalJSON() ([]byte, error) {
 	type tmpType struct {
-		Step  string `json:"step"`
+		Step  string `json:"step,omitempty"`
 		Msg   string `json:"msg,omitempty"`
 		Data  any    `json:"data,omitempty"`
 		Error string `json:"error,omitempty"`
@@ -123,13 +124,18 @@ func cleanChunks(chunkDir string) {
 	}
 }
 
+type RelayState struct {
+	FileHash        string   `json:"fileHash,omitempty"`
+	StorageMiners   []string `json:"miners,omitempty"`
+	CurrentProgress Progress `json:"progress,omitempty"`
+}
+
 type RelayHandler struct {
-	id              int64
-	fileStash       *FileStash
-	storageMiners   []string
-	currentProgress Progress
-	progressChan    chan Progress
-	completeTime    time.Time
+	id           int64
+	fileStash    *FileStash
+	state        *RelayState
+	progressChan chan Progress
+	completeTime time.Time
 }
 
 func (t *RelayHandler) Id() int64 { return t.id }
@@ -139,6 +145,10 @@ func (t *RelayHandler) ListenerProgress() <-chan Progress {
 		t.progressChan = make(chan Progress)
 	}
 	return t.progressChan
+}
+
+func (t *RelayHandler) State() *RelayState {
+	return t.state
 }
 
 func (t *RelayHandler) pushProgress(step string, arg ...any) {
@@ -152,7 +162,7 @@ func (t *RelayHandler) pushProgress(step string, arg ...any) {
 			p.Data = arg[0]
 		}
 	}
-	t.currentProgress = p
+	t.state.CurrentProgress = p
 	log.Output(2, fmt.Sprintf("%s", p))
 	if t.progressChan != nil {
 		t.progressChan <- p
@@ -189,12 +199,15 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 	}()
 	defer openedMpFile.Close()
 
+	t.state = new(RelayState)
+
 	t.pushProgress("sharding")
 	ccr, err := t.cutToChunks(openedMpFile, fileHeader.Size, accountId)
 	if err != nil {
 		return errors.Wrap(err, "shard file error")
 	}
 	defer cleanChunks(ccr.chunkDir)
+	t.state.FileHash = ccr.fileHash
 	t.pushProgress("sharded", map[string]string{"fileHash": ccr.fileHash})
 
 	t.pushProgress("stashing")
@@ -447,11 +460,14 @@ func (t *RelayHandler) tryUpload(rctx *RelayContext, msg string, sign []byte, sc
 
 func (t *RelayHandler) Receive(fsi *cessfc.FileStoreInfo) {
 	if fsi.Miners != nil && len(fsi.Miners) > 0 {
-		t.storageMiners = make([]string, 0, len(fsi.Miners))
+		t.state.StorageMiners = make([]string, 0, len(fsi.Miners))
 		for _, v := range fsi.Miners {
-			t.storageMiners = append(t.storageMiners, v)
+			t.state.StorageMiners = append(t.state.StorageMiners, v)
 		}
-		t.pushProgress("uploading", makeMinersForProgress(t.storageMiners))
+		sort.Slice(t.state.StorageMiners, func(i, j int) bool {
+			return t.state.StorageMiners[i] > t.state.StorageMiners[j]
+		})
+		t.pushProgress("uploading", makeMinersForProgress(t.state.StorageMiners))
 	}
 }
 

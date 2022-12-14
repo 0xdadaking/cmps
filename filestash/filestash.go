@@ -177,3 +177,11 @@ func (t *FileStash) DownloadFile(fileHash string) (*FileBriefInfo, error) {
 
 	return t.downloadFile(fileHash, &fmeta)
 }
+
+func (t *FileStash) RemoveFile(fileHash string) error {
+	fileHashDir := filepath.Join(t.fileStashDir, fileHash)
+	if _, err := os.Stat(fileHashDir); os.IsNotExist(err) {
+		return nil
+	}
+	return os.RemoveAll(fileHashDir)
+}
