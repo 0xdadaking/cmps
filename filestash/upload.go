@@ -85,6 +85,7 @@ func (t *FileStash) Upload(fileHeader *multipart.FileHeader, accountId types.Acc
 		chunksDir:    t.chunksDir,
 		fileStashDir: t.fileStashDir,
 	}
+	log.Printf("allot relay handler %p for %d", rh, uploadId)
 	t.relayHandlers[uploadId] = rh
 	go func() {
 		t.relayHandlerPutChan <- rh
@@ -94,7 +95,14 @@ func (t *FileStash) Upload(fileHeader *multipart.FileHeader, accountId types.Acc
 	if err != nil {
 		return nil, err
 	}
-	go rh.Relay(openedMpFile, fileHeader, accountId, forceUploadIfPending)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("internal error: %+v", r)
+			}
+		}()
+		rh.Relay(openedMpFile, fileHeader, accountId, forceUploadIfPending)
+	}()
 
 	return &UploadResult{uploadId}, nil
 }
@@ -165,13 +173,13 @@ func (t *RelayHandler) close() {
 }
 
 func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.FileHeader, accountId types.AccountID, forceUploadIfPending bool) (retErr error) {
-	defer openedMpFile.Close()
 	defer func() {
 		if retErr != nil {
-			t.completeTime = time.Now()
 			t.pushProgress(_ABORT_STEP, retErr)
+			t.completeTime = time.Now()
 		}
 	}()
+	defer openedMpFile.Close()
 
 	t.pushProgress("sharding")
 	ccr, err := t.cutToChunks(openedMpFile, fileHeader.Size, accountId)
