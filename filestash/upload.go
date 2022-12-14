@@ -79,11 +79,8 @@ func (t *FileStash) Upload(fileHeader *multipart.FileHeader, accountId types.Acc
 	}
 
 	rh := &RelayHandler{
-		id:           uploadId,
-		cessc:        t.cessc,
-		keyring:      t.keyring,
-		chunksDir:    t.chunksDir,
-		fileStashDir: t.fileStashDir,
+		id:        uploadId,
+		fileStash: t,
 	}
 	log.Printf("allot relay handler %p for %d", rh, uploadId)
 	t.relayHandlers[uploadId] = rh
@@ -127,12 +124,8 @@ func cleanChunks(chunkDir string) {
 }
 
 type RelayHandler struct {
-	id           int64
-	cessc        chain.Chainer
-	keyring      *cesskeyring.KeyRing
-	fileStashDir string
-	chunksDir    string
-
+	id              int64
+	fileStash       *FileStash
 	storageMiners   []string
 	currentProgress Progress
 	progressChan    chan Progress
@@ -172,6 +165,21 @@ func (t *RelayHandler) close() {
 	}
 }
 
+func (t *RelayHandler) stashFile(fileHash string, src io.Reader, originName string) error {
+	fhdf, err := t.fileStash.createFileHashDataFile(fileHash)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(fhdf, src); err != nil {
+		return err
+	}
+
+	return t.fileStash.storeSimpleFileMeta(&SimpleFileMeta{
+		FileHash:   fileHash,
+		OriginName: originName,
+	})
+}
+
 func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.FileHeader, accountId types.AccountID, forceUploadIfPending bool) (retErr error) {
 	defer func() {
 		if retErr != nil {
@@ -188,6 +196,16 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 	}
 	defer cleanChunks(ccr.chunkDir)
 	t.pushProgress("sharded", map[string]string{"fileHash": ccr.fileHash})
+
+	t.pushProgress("stashing")
+	_, err = openedMpFile.Seek(0, io.SeekStart)
+	if err != nil {
+		return errors.Wrap(err, "seek file error when stash")
+	}
+	err = t.stashFile(ccr.fileHash, openedMpFile, fileHeader.Filename)
+	if err != nil {
+		return errors.Wrap(err, "stash file error")
+	}
 
 	t.pushProgress("bucketing")
 	if _, err := t.createBucketIfAbsent(accountId); err != nil {
@@ -212,7 +230,7 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 			accountId,
 		})
 	} else {
-		miners, err := queryFileStoredMiners(ccr.fileHash, t.cessc)
+		miners, err := queryFileStoredMiners(ccr.fileHash, t.fileStash.cessc)
 		if err != nil {
 			t.pushProgress("thunder", map[string]string{"error": err.Error()})
 		} else {
@@ -242,10 +260,10 @@ func queryFileStoredMiners(fileHash string, cessc chain.Chainer) ([]string, erro
 }
 
 func (t *RelayHandler) createBucketIfAbsent(accountId types.AccountID) (string, error) {
-	_, err := t.cessc.GetBucketInfo(accountId[:], configs.DEFAULT_BUCKET)
+	_, err := t.fileStash.cessc.GetBucketInfo(accountId[:], configs.DEFAULT_BUCKET)
 	if err != nil {
 		log.Println("get bucket info error:", err)
-		txHash, err := t.cessc.CreateBucket(accountId[:], configs.DEFAULT_BUCKET)
+		txHash, err := t.fileStash.cessc.CreateBucket(accountId[:], configs.DEFAULT_BUCKET)
 		log.Println("create bucket tx:", txHash)
 		return txHash, err
 	}
@@ -258,7 +276,7 @@ type declareFileResult struct {
 }
 
 func (t *RelayHandler) declareFileIfAbsent(accountId types.AccountID, fileHash string, originFilename string) (*declareFileResult, error) {
-	fmeta, err := t.cessc.GetFileMetaInfo(fileHash)
+	fmeta, err := t.fileStash.cessc.GetFileMetaInfo(fileHash)
 	if err != nil {
 		if err.Error() != chain.ERR_Empty {
 			return nil, err
@@ -268,7 +286,7 @@ func (t *RelayHandler) declareFileIfAbsent(accountId types.AccountID, fileHash s
 			File_name:   types.Bytes(originFilename),
 			Bucket_name: types.Bytes(configs.DEFAULT_BUCKET),
 		}
-		txHash, err := t.cessc.DeclarationFile(fileHash, userBrief)
+		txHash, err := t.fileStash.cessc.DeclarationFile(fileHash, userBrief)
 		if err != nil {
 			return nil, errors.Wrap(err, "make declare file transaction failed")
 		}
@@ -287,7 +305,7 @@ type chunkCutResult struct {
 }
 
 func (t *RelayHandler) cutToChunks(fileInput io.ReadCloser, size int64, accountId types.AccountID) (*chunkCutResult, error) {
-	chunkDir, err := os.MkdirTemp(t.chunksDir, "up-chunks-")
+	chunkDir, err := os.MkdirTemp(t.fileStash.chunksDir, "up-chunks-")
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +372,7 @@ type RelayContext struct {
 }
 
 func (t *RelayHandler) relayUpload(rctx *RelayContext) (retErr error) {
-	msg, sign, err := makeSign(t.keyring)
+	msg, sign, err := makeSign(t.fileStash.keyring)
 	if err != nil {
 		return errors.Wrap(err, "sign msg error")
 	}
@@ -364,7 +382,7 @@ func (t *RelayHandler) relayUpload(rctx *RelayContext) (retErr error) {
 		time.Sleep(time.Duration(n) * time.Second)
 	}
 	for i := 0; i < 3; i++ {
-		scheds, err := randomSequenceScheduler(t.cessc)
+		scheds, err := randomSequenceScheduler(t.fileStash.cessc)
 		if err != nil {
 			incSleep(i, "query scheduler server failed")
 			continue
@@ -406,10 +424,10 @@ func (t *RelayHandler) tryUpload(rctx *RelayContext, msg string, sign []byte, sc
 		}
 
 		t.pushProgress("uploading", fmt.Sprintf("connected to scheduler server: %s", address))
-		client := cessfc.NewClient(conn, t.fileStashDir, rctx.chunkPaths)
+		client := cessfc.NewClient(conn, t.fileStash.fileStashDir, rctx.chunkPaths)
 		client.SetFsiReceiver(t)
 
-		pubKey := t.keyring.Public()
+		pubKey := t.fileStash.keyring.Public()
 		err = client.SendFile(rctx.fileHash, rctx.fileSize, pubKey[:], []byte(msg), sign[:])
 		if err != nil {
 			return errors.Wrapf(err, "send file invoke error")

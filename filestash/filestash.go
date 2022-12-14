@@ -150,10 +150,18 @@ func (t *FileStash) ensureFileHashDir(fileHash string) (string, error) {
 	if _, err := os.Stat(fileHashDir); os.IsNotExist(err) {
 		err = os.Mkdir(fileHashDir, 0755)
 		if err != nil {
-			return "", err
+			return "", errors.Wrap(err, "make filehash dir error")
 		}
 	}
 	return fileHashDir, nil
+}
+
+func (t *FileStash) createFileHashDataFile(fileHash string) (*os.File, error) {
+	dir, err := t.ensureFileHashDir(fileHash)
+	if err != nil {
+		return nil, err
+	}
+	return os.Create(filepath.Join(dir, "data"))
 }
 
 func (t *FileStash) DownloadFile(fileHash string) (*FileBriefInfo, error) {

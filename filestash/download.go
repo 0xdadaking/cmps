@@ -3,7 +3,6 @@ package filestash
 import (
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -19,9 +18,9 @@ import (
 )
 
 func (t *FileStash) downloadFile(fileHash string, fmeta *chain.FileMetaInfo) (*FileBriefInfo, error) {
-	fileHashDir := filepath.Join(t.fileStashDir, fileHash)
-	if err := os.Mkdir(fileHashDir, 0755); err != nil && !errors.Is(err, fs.ErrExist) {
-		return nil, errors.Wrap(err, "make filehash dir error")
+	fileHashDataFile, err := t.createFileHashDataFile(fileHash)
+	if err != nil {
+		return nil, err
 	}
 	tmpChunkDir, err := os.MkdirTemp(t.chunksDir, "down-chunks-")
 	defer os.RemoveAll(tmpChunkDir)
@@ -57,10 +56,9 @@ func (t *FileStash) downloadFile(fileHash string, fmeta *chain.FileMetaInfo) (*F
 	}
 
 	log.Println("begin restore...")
-	output, err := os.Create(filepath.Join(fileHashDir, "data"))
 	minCountToDownload, parityShards := fmeta.MinChunkCountToDownload()
 	start = time.Now()
-	rsecd := erasure.NewRsecDecoder(output, minCountToDownload, parityShards, shardOpener, shardCreater)
+	rsecd := erasure.NewRsecDecoder(fileHashDataFile, minCountToDownload, parityShards, shardOpener, shardCreater)
 	err = rsecd.Decode()
 	if err != nil {
 		return nil, errors.Wrap(err, "ReedSolomon restore error")
@@ -73,7 +71,7 @@ func (t *FileStash) downloadFile(fileHash string, fmeta *chain.FileMetaInfo) (*F
 	return &FileBriefInfo{
 		OriginName: sfm.OriginName,
 		FileHash:   fileHash,
-		FilePath:   output.Name(),
+		FilePath:   fileHashDataFile.Name(),
 		Size:       rsecd.OutputSize(),
 	}, nil
 }
