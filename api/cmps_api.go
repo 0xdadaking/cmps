@@ -117,6 +117,7 @@ type LupMsg struct {
 }
 
 func (n Node) ListenerUploadProgress(c *gin.Context) {
+	log.Printf("upload progress listener coming, m:%s, url:%s, client ip:%s", c.Request.Method, c.Request.URL, c.ClientIP())
 	var f UploadStateReq
 	if err := c.ShouldBindUri(&f); err != nil {
 		resp.Error(c, err)
@@ -135,28 +136,40 @@ func (n Node) ListenerUploadProgress(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	pushMsgForRelayHandler(ws, rh)
-	log.Println("websocket listener finish")
+	closeSignal := make(chan bool)
+	ws.SetCloseHandler(func(code int, text string) error {
+		log.Printf("websocket close code:%d, text:%s", code, text)
+		closeSignal <- true
+		return nil
+	})
+	pushMsgForRelayHandler(ws, rh, closeSignal)
+	log.Printf("upload progress listener %d finish", f.UploadId)
 }
 
-func pushMsgForRelayHandler(ws *websocket.Conn, rh *filestash.RelayHandler) {
+func pushMsgForRelayHandler(ws *websocket.Conn, rh *filestash.RelayHandler, closeSignal <-chan bool) {
 	err := ws.WriteJSON(LupMsg{LMT_STATE, rh.State()})
 	if err != nil {
 		log.Printf("write relay handler state to websocket error: %+v", err)
 		return
 	}
-	for p := range rh.ListenerProgress() {
-		err = ws.WriteJSON(LupMsg{LMT_PROGRESS, p})
-		if err != nil {
-			log.Printf("write relay handler progress to websocket error: %+v", err)
+	for {
+		select {
+		case p := <-rh.ListenerProgress():
+			err = ws.WriteJSON(LupMsg{LMT_PROGRESS, p})
+			if err != nil {
+				log.Printf("write relay handler progress to websocket error: %+v", err)
+				return
+			}
+			if p.IsComplete() {
+				return
+			}
+			if p.IsAbort() {
+				log.Println("progress abort error:", p.Error)
+				return
+			}
+		case <-closeSignal:
+			log.Println("websocket close signal coming")
 			return
-		}
-		if p.IsComplete() {
-			break
-		}
-		if p.IsAbort() {
-			log.Println("progress abort error:", p.Error)
-			break
 		}
 	}
 }
@@ -169,11 +182,20 @@ func (n Node) DebugUploadProgress(c *gin.Context) {
 	}
 	defer ws.Close()
 
+	closeSignal := make(chan bool)
+	wsClosed := false
+	ws.SetCloseHandler(func(code int, text string) error {
+		log.Printf("websocket close code:%d, text:%s", code, text)
+		wsClosed = true
+		closeSignal <- true
+		return nil
+	})
 	ws.WriteMessage(websocket.TextMessage, []byte("waiting for file upload..."))
-	for rh := range n.FileStash.AnyRelayHandler() {
-		pushMsgForRelayHandler(ws, rh)
+	for !wsClosed {
+		rh := <-n.FileStash.AnyRelayHandler()
+		pushMsgForRelayHandler(ws, rh, closeSignal)
 	}
-	log.Println("websocket listener finish")
+	log.Println("debug upload progress websocket listener finish")
 }
 
 func (n Node) GetFileState(c *gin.Context) {

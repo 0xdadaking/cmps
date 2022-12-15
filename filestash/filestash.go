@@ -72,7 +72,7 @@ func startCleanCompleteRelayHandlerTask(fsth *FileStash) {
 	go func() {
 		for {
 			for k, rh := range fsth.relayHandlers {
-				if !rh.completeTime.IsZero() && time.Now().After(rh.completeTime.Add(5*time.Second)) {
+				if rh.CanClean() {
 					rh.close()
 					delete(fsth.relayHandlers, k)
 					log.Printf("clean relay handler %p, %d", rh, rh.Id())

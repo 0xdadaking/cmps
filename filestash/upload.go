@@ -21,6 +21,7 @@ import (
 
 	cesskeyring "github.com/CESSProject/go-keyring"
 	"github.com/pkg/errors"
+	"golang.org/x/exp/slices"
 
 	"github.com/centrifuge/go-substrate-rpc-client/v4/types"
 )
@@ -34,23 +35,23 @@ var (
 	ErrFileOnPending = errors.New("the file of uploaded is pending")
 )
 
-type Progress struct {
+type HandleStep struct {
 	Step  string
 	Msg   string
 	Data  any
 	Error error
 }
 
-func (t Progress) IsComplete() bool { return t.Step == _FINISH_STEP }
-func (t Progress) IsAbort() bool    { return t.Error != nil }
-func (t Progress) String() string {
+func (t HandleStep) IsComplete() bool { return t.Step == _FINISH_STEP }
+func (t HandleStep) IsAbort() bool    { return t.Error != nil }
+func (t HandleStep) String() string {
 	b, err := json.Marshal(t)
 	if err != nil {
 		return fmt.Sprintf("step:%s <json marshal error:%v>", t.Step, err)
 	}
 	return fmt.Sprint("progress", string(b))
 }
-func (t Progress) MarshalJSON() ([]byte, error) {
+func (t HandleStep) MarshalJSON() ([]byte, error) {
 	type tmpType struct {
 		Step  string `json:"step,omitempty"`
 		Msg   string `json:"msg,omitempty"`
@@ -125,34 +126,49 @@ func cleanChunks(chunkDir string) {
 }
 
 type RelayState struct {
-	FileHash        string   `json:"fileHash,omitempty"`
-	StorageMiners   []string `json:"miners,omitempty"`
-	CurrentProgress Progress `json:"progress,omitempty"`
+	FileHash     string        `json:"fileHash,omitempty"`
+	Miners       []string      `json:"miners,omitempty"`
+	Steps        []*HandleStep `json:"steps,omitempty"`
+	CompleteTime time.Time     `json:"completeTime,omitempty"`
+}
+
+func (t *RelayState) pushStep(step *HandleStep) {
+	t.Steps = append(t.Steps, step)
+	if step.Step == _FINISH_STEP || step.Step == _ABORT_STEP {
+		t.CompleteTime = time.Now()
+	}
+}
+
+func (t *RelayState) isCompleteBefore(ref time.Time, d time.Duration) bool {
+	return !t.CompleteTime.IsZero() && ref.After(t.CompleteTime.Add(d))
 }
 
 type RelayHandler struct {
-	id           int64
-	fileStash    *FileStash
-	state        *RelayState
-	progressChan chan Progress
-	completeTime time.Time
+	id        int64
+	fileStash *FileStash
+	state     *RelayState
+	stepChan  chan HandleStep
 }
 
 func (t *RelayHandler) Id() int64 { return t.id }
 
-func (t *RelayHandler) ListenerProgress() <-chan Progress {
-	if t.progressChan == nil {
-		t.progressChan = make(chan Progress)
+func (t *RelayHandler) ListenerProgress() <-chan HandleStep {
+	if t.stepChan == nil {
+		t.stepChan = make(chan HandleStep)
 	}
-	return t.progressChan
+	return t.stepChan
 }
 
 func (t *RelayHandler) State() *RelayState {
 	return t.state
 }
 
-func (t *RelayHandler) pushProgress(step string, arg ...any) {
-	p := Progress{Step: step}
+func (t *RelayHandler) CanClean() bool {
+	return t.state != nil && t.state.isCompleteBefore(time.Now(), 1800*time.Second)
+}
+
+func (t *RelayHandler) pushStep(step string, arg ...any) {
+	p := HandleStep{Step: step}
 	if arg != nil {
 		if err, ok := arg[0].(error); ok {
 			p.Error = err
@@ -162,16 +178,16 @@ func (t *RelayHandler) pushProgress(step string, arg ...any) {
 			p.Data = arg[0]
 		}
 	}
-	t.state.CurrentProgress = p
+	t.state.pushStep(&p)
 	log.Output(2, fmt.Sprintf("%s", p))
-	if t.progressChan != nil {
-		t.progressChan <- p
+	if t.stepChan != nil {
+		t.stepChan <- p
 	}
 }
 
 func (t *RelayHandler) close() {
-	if t.progressChan != nil {
-		close(t.progressChan)
+	if t.stepChan != nil {
+		close(t.stepChan)
 	}
 }
 
@@ -193,24 +209,23 @@ func (t *RelayHandler) stashFile(fileHash string, src io.Reader, originName stri
 func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.FileHeader, accountId types.AccountID, forceUploadIfPending bool) (retErr error) {
 	defer func() {
 		if retErr != nil {
-			t.pushProgress(_ABORT_STEP, retErr)
-			t.completeTime = time.Now()
+			t.pushStep(_ABORT_STEP, retErr)
 		}
 	}()
 	defer openedMpFile.Close()
 
-	t.state = new(RelayState)
+	t.state = &RelayState{}
 
-	t.pushProgress("sharding")
+	t.pushStep("sharding")
 	ccr, err := t.cutToChunks(openedMpFile, fileHeader.Size, accountId)
 	if err != nil {
 		return errors.Wrap(err, "shard file error")
 	}
 	defer cleanChunks(ccr.chunkDir)
 	t.state.FileHash = ccr.fileHash
-	t.pushProgress("sharded", map[string]string{"fileHash": ccr.fileHash})
+	t.pushStep("sharded", map[string]string{"fileHash": ccr.fileHash})
 
-	t.pushProgress("stashing")
+	t.pushStep("stashing")
 	_, err = openedMpFile.Seek(0, io.SeekStart)
 	if err != nil {
 		return errors.Wrap(err, "seek file error when stash")
@@ -220,12 +235,12 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 		return errors.Wrap(err, "stash file error")
 	}
 
-	t.pushProgress("bucketing")
+	t.pushStep("bucketing")
 	if _, err := t.createBucketIfAbsent(accountId); err != nil {
 		return errors.Wrap(err, "create bucket error")
 	}
 
-	t.pushProgress("declaring")
+	t.pushStep("declaring")
 	dr, err := t.declareFileIfAbsent(accountId, ccr.fileHash, fileHeader.Filename)
 	if err != nil {
 		if forceUploadIfPending && !errors.Is(err, ErrFileOnPending) {
@@ -233,7 +248,7 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 		}
 	}
 	if dr.needRelay {
-		t.relayUpload(&RelayContext{
+		err := t.relayUpload(&RelayContext{
 			ccr.fileHash,
 			fileHeader.Filename,
 			dr.txHash,
@@ -242,16 +257,19 @@ func (t *RelayHandler) Relay(openedMpFile multipart.File, fileHeader *multipart.
 			ccr.chunkPaths,
 			accountId,
 		})
+		if err == nil {
+			t.blockPollMinerStorageState(ccr.fileHash)
+		}
 	} else {
 		miners, err := queryFileStoredMiners(ccr.fileHash, t.fileStash.cessc)
 		if err != nil {
-			t.pushProgress("thunder", map[string]string{"error": err.Error()})
+			t.pushStep("thunder", map[string]string{"error": err.Error()})
 		} else {
-			t.pushProgress("thunder", makeMinersForProgress(miners))
+			t.state.Miners = miners
+			t.pushStep("thunder", makeMinersForProgress(miners))
 		}
 	}
-	t.pushProgress(_FINISH_STEP)
-	t.completeTime = time.Now()
+	t.pushStep(_FINISH_STEP)
 	return nil
 }
 
@@ -261,6 +279,11 @@ func queryFileStoredMiners(fileHash string, cessc chain.Chainer) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
+	return extractMiners(&fmeta), nil
+}
+
+func extractMiners(fmeta *chain.FileMetaInfo) []string {
+	var err error
 	miners := make([]string, len(fmeta.BlockInfo))
 	for i, b := range fmeta.BlockInfo {
 		miners[i], err = utils.EncodePublicKeyAsCessAccount(b.MinerAcc[:])
@@ -269,7 +292,7 @@ func queryFileStoredMiners(fileHash string, cessc chain.Chainer) ([]string, erro
 			continue
 		}
 	}
-	return miners, nil
+	return miners
 }
 
 func (t *RelayHandler) createBucketIfAbsent(accountId types.AccountID) (string, error) {
@@ -391,7 +414,7 @@ func (t *RelayHandler) relayUpload(rctx *RelayContext) (retErr error) {
 	}
 	incSleep := func(i int, msg string) {
 		n := i*i + 2
-		t.pushProgress("uploading", fmt.Sprintf("%s, %d seconds later try again", msg, n))
+		t.pushStep("uploading", fmt.Sprintf("%s, %d seconds later try again", msg, n))
 		time.Sleep(time.Duration(n) * time.Second)
 	}
 	for i := 0; i < 3; i++ {
@@ -436,7 +459,7 @@ func (t *RelayHandler) tryUpload(rctx *RelayContext, msg string, sign []byte, sc
 			return errors.Wrapf(err, "dial address %s failed", address)
 		}
 
-		t.pushProgress("uploading", fmt.Sprintf("connected to scheduler server: %s", address))
+		t.pushStep("uploading", fmt.Sprintf("connected to scheduler server: %s", address))
 		client := cessfc.NewClient(conn, t.fileStash.fileStashDir, rctx.chunkPaths)
 		client.SetFsiReceiver(t)
 
@@ -460,17 +483,44 @@ func (t *RelayHandler) tryUpload(rctx *RelayContext, msg string, sign []byte, sc
 
 func (t *RelayHandler) Receive(fsi *cessfc.FileStoreInfo) {
 	if fsi.Miners != nil && len(fsi.Miners) > 0 {
-		t.state.StorageMiners = make([]string, 0, len(fsi.Miners))
+		miners := make([]string, 0, len(fsi.Miners))
 		for _, v := range fsi.Miners {
-			t.state.StorageMiners = append(t.state.StorageMiners, v)
+			miners = append(miners, v)
 		}
-		sort.Slice(t.state.StorageMiners, func(i, j int) bool {
-			return t.state.StorageMiners[i] > t.state.StorageMiners[j]
+		sort.Slice(miners, func(i, j int) bool {
+			return miners[i] > miners[j]
 		})
-		t.pushProgress("uploading", makeMinersForProgress(t.state.StorageMiners))
+		if !slices.Equal(t.state.Miners, miners) {
+			t.state.Miners = miners
+			t.pushStep("uploading", makeMinersForProgress(miners))
+		}
 	}
 }
 
 func makeMinersForProgress(miners []string) map[string][]string {
 	return map[string][]string{"miners": miners}
+}
+
+func (t *RelayHandler) blockPollMinerStorageState(fileHash string) {
+	t.pushStep("storing", "begin polling the file storage state on chain")
+	for i := 0; i < 30; i++ {
+		fmeta, err := t.fileStash.cessc.GetFileMetaInfo(fileHash)
+		if err != nil {
+			log.Println("poll file state error:", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		log.Printf("polling %s, %s, %d", fileHash, string(fmeta.State), i)
+		if string(fmeta.State) == chain.FILE_STATE_ACTIVE {
+			miners := extractMiners(&fmeta)
+			sort.Slice(miners, func(i, j int) bool {
+				return miners[i] > miners[j]
+			})
+			t.state.Miners = miners
+			t.pushStep("stored", makeMinersForProgress(miners))
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.pushStep("storing", "the file storage may be processing, try poll later")
 }

@@ -1,6 +1,7 @@
 package cessfc
 
 import (
+	"cmps/pkg/chain"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ type ConMgr struct {
 	stop       chan struct{}
 
 	fsiReceiver FileStoreInfoReceiver
+	stopFsiPoll bool
 }
 
 func (c *ConMgr) handler() error {
@@ -61,13 +63,16 @@ func (c *ConMgr) handler() error {
 		case MsgFileSt:
 			if m.Bytes != nil && len(m.Bytes) > 0 {
 				var fsi FileStoreInfo
-				err := json.Unmarshal(m.Bytes, &fsi)
+				err := json.Unmarshal(m.Bytes[:m.FileSize], &fsi)
 				if err != nil {
 					log.Printf("json unmarshal MsgFileSt.Bytes error:%v, msg.Bytes:%s", err, m.Bytes)
 					continue
 				}
 				if c.fsiReceiver != nil {
 					go c.fsiReceiver.Receive(&fsi)
+					if fsi.FileState == chain.FILE_STATE_ACTIVE {
+						c.stopFsiPoll = true
+					}
 				}
 			}
 
@@ -203,9 +208,15 @@ func (c *ConMgr) sendFile(fid string, fsize int64, pkey, signmsg, sign []byte) e
 			return err
 		}
 	}
-
+	if c.fsiReceiver != nil {
+		//polling file storage state
+		for i := 0; !c.stopFsiPoll && i < 100; i++ {
+			c.sendFileSt(fid)
+			time.Sleep(time.Second * 2)
+		}
+	}
 	c.conn.SendMsg(NewCloseMsg(c.fileName, Status_Ok))
-	time.Sleep(time.Second * 3)
+	time.Sleep(time.Second)
 	return err
 }
 
@@ -318,9 +329,6 @@ func (c *ConMgr) sendSingleFile(filePath string, fid string, fsize int64, lastma
 		return nil
 	}, int(waitTime), "EndMsg")
 
-	if c.fsiReceiver != nil {
-		c.sendFileSt(fid)
-	}
 	return nil
 }
 
