@@ -27,14 +27,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// http
-const (
-	Header_Auth       = "Authorization"
-	Header_BucketName = "BucketName"
-	Header_Account    = "Account"
-	Header_Operation  = "Operation"
-)
-
 type Node struct {
 	Confile   confile.Confiler
 	Chain     chain.Chainer
@@ -69,16 +61,7 @@ func MustNewNode(cfg confile.Confiler) *Node {
 func (n *Node) Run() {
 	gin.SetMode(gin.ReleaseMode)
 	n.Gin = gin.Default()
-	config := cors.DefaultConfig()
-	config.AllowAllOrigins = true
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	config.AddAllowHeaders(
-		Header_Auth,
-		Header_Account,
-		Header_BucketName,
-		"*",
-	)
-	n.Gin.Use(cors.New(config))
+	n.Gin.Use(cors.Default())
 
 	// Add route
 	n.addRoute()
